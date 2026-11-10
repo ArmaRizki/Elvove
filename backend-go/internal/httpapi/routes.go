@@ -70,7 +70,6 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/public/social-links", s.getSocialLinks)
 	mux.HandleFunc("GET /api/public/categories", s.getCategories)
 	mux.HandleFunc("GET /api/public/packages", s.getPackages)
-	mux.HandleFunc("GET /api/public/faqs", s.getFAQs)
 	mux.HandleFunc("GET /api/public/photos", s.getPhotos)
 	mux.Handle("/uploads/originals/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Java's SecurityConfig has .requestMatchers("/uploads/originals/**").denyAll(),
@@ -117,9 +116,6 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("POST /api/admin/packages", s.createPackage)
 	admin.HandleFunc("PUT /api/admin/packages/{id}", s.updatePackage)
 	admin.HandleFunc("DELETE /api/admin/packages/{id}", s.deletePackage)
-	admin.HandleFunc("POST /api/admin/faqs", s.createFAQ)
-	admin.HandleFunc("PUT /api/admin/faqs/{id}", s.updateFAQ)
-	admin.HandleFunc("DELETE /api/admin/faqs/{id}", s.deleteFAQ)
 	admin.HandleFunc("PUT /api/admin/about", s.updateAbout)
 	admin.HandleFunc("PUT /api/admin/contact", s.updateContact)
 	admin.HandleFunc("PUT /api/admin/terms", s.updateTerms)
@@ -263,11 +259,6 @@ func (s *Server) getPackages(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, items)
-}
-
-func (s *Server) getFAQs(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.QueryRows(r.Context(), `SELECT id, question, answer, display_order AS "displayOrder" FROM faqs ORDER BY display_order ASC, id ASC`)
-	s.rowsOrError(w, rows, err)
 }
 
 func (s *Server) getPhotos(w http.ResponseWriter, r *http.Request) {

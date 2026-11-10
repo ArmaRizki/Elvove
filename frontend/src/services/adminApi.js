@@ -37,10 +37,6 @@ export const adminApi = {
   createPackage: (data) => api.post("/api/admin/packages", data),
   updatePackage: (id, data) => api.put(`/api/admin/packages/${id}`, data),
   deletePackage: (id) => api.delete(`/api/admin/packages/${id}`),
-  getFaqs: () => api.get("/api/public/faqs"),
-  createFaq: (data) => api.post("/api/admin/faqs", data),
-  updateFaq: (id, data) => api.put(`/api/admin/faqs/${id}`, data),
-  deleteFaq: (id) => api.delete(`/api/admin/faqs/${id}`),
 
   // Bookings
   getBookings: () => api.get("/api/admin/bookings"),

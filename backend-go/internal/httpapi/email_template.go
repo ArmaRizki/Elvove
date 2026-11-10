@@ -150,33 +150,29 @@ func renderAdminNotification(b bookingEmail, senderName, link, siteURL string) (
 	siteURL = emailSiteURL(siteURL)
 	brand := emailBrandName(senderName)
 	customer := emailOneLine(b.Name)
-	id := "-"
-	if b.ID > 0 {
-		id = strconv.FormatInt(b.ID, 10)
-	}
 
 	body := emailBadge("BOOKING BARU") +
 		emailHeadingBlock(
 			"Ada Pemesanan Baru",
 			"Sebuah pemesanan baru telah tersimpan di sistem "+brand+".") +
 		emailGreetingBlock(
-			"Booking #"+id+" dari "+customer+".",
+			"Pemesanan baru dari "+customer+".",
 			"Berikut detail pemesanan yang baru masuk. Buka panel admin untuk meninjau dan mengubah status.") +
-		emailAdminDetailsCard(b, id) +
+		emailAdminDetailsCard(b) +
 		emailAdminButton(link)
 
 	var text strings.Builder
 	text.WriteString("BOOKING BARU\n\n")
 	text.WriteString("Ada Pemesanan Baru\n\n")
-	text.WriteString("Booking #" + id + " dari " + customer + ".\n\n")
+	text.WriteString("Pemesanan baru dari " + customer + ".\n\n")
 	text.WriteString("DETAIL BOOKING\n")
-	text.WriteString(emailAdminDetailLines(b, id))
+	text.WriteString(emailAdminDetailLines(b))
 	text.WriteString("\nBuka panel admin: " + link + "\n\n")
 	text.WriteString("Elvove\n")
 	text.WriteString(emailTagline + "\n")
 
-	subject := "Booking Baru #" + id + " — " + customer
-	preview := "Booking baru #" + id + " dari " + customer + "."
+	subject := "Booking Baru — " + customer
+	preview := "Pemesanan baru dari " + customer + "."
 	return subject, emailDocument(body, preview, siteURL), text.String()
 }
 
@@ -330,16 +326,14 @@ func emailDetailsCard(b bookingEmail) string {
 		"</td></tr></table>"
 }
 
-// The admin booking card: the booking ID and customer contact, then the event
-// details.
-func emailAdminDetailsCard(b bookingEmail, id string) string {
+// The admin booking card: customer contact, then the event details.
+func emailAdminDetailsCard(b bookingEmail) string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;margin-top:30px;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:18px 18px 4px 18px;font-family:" + emailFont + ";font-size:11px;" +
 		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailMuted + ";\">" +
 		"DETAIL BOOKING" +
 		"</td></tr>" +
-		emailDetailRow("ID Booking", "#"+id, false, false) +
 		emailDetailRow("Nama Pemesan", emailOneLine(b.Name), false, false) +
 		emailDetailRow("Email", emailOneLine(b.Email), false, false) +
 		emailDetailRow("Telepon", emailOneLine(b.Phone), false, false) +
@@ -520,9 +514,8 @@ func emailDetailLines(b bookingEmail) string {
 		"Sisa Pembayaran : " + emailPending + "\n"
 }
 
-func emailAdminDetailLines(b bookingEmail, id string) string {
-	return "ID Booking        : #" + id + "\n" +
-		"Nama Pemesan    : " + emailOneLine(b.Name) + "\n" +
+func emailAdminDetailLines(b bookingEmail) string {
+	return "Nama Pemesan    : " + emailOneLine(b.Name) + "\n" +
 		"Email           : " + emailOneLine(b.Email) + "\n" +
 		"Telepon         : " + emailOneLine(b.Phone) + "\n" +
 		"Tanggal Booking : " + emailTanggal(b.EventDate) + "\n" +

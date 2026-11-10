@@ -19,7 +19,7 @@ This README records what changed.
 | Backend | Spring Boot 3.3.4 · Java 17 · JPA/Hibernate | Go 1.23+ · `net/http` · pgx v5 — Java kept as reference |
 | Content modules | Galleries, Services, Testimonials, Videos | Removed; replaced by Terms, SMTP and booking-notification settings |
 | Public pages | 14 | 10 |
-| Admin sections | 13 | 12 (new: calendar, Terms, SMTP; 4 modules gone) |
+| Admin sections | 13 | 11 (new: calendar, Terms, SMTP; 5 modules gone) |
 | Booking flow | `PENDING → CONTACTED → COMPLETED` | `PENDING → ACCEPTED → RESCHEDULE_REQUESTED → COMPLETED` |
 | E-mail | none | SMTP stored in DB, confirmation, reschedule and admin notifications |
 | Uploads | 10 MB, extension check only | 50/100 MB, magic-byte check, WebP thumbnail + preview, original admin-only |
@@ -53,15 +53,17 @@ intentional differences live in `backend-go/README.md`.
 
 ## 2. Removed
 
-Four content modules were dropped from both the API and the UI, along with their
+Five content modules were dropped from both the API and the UI, along with their
 tables, controllers, services, repositories and admin screens:
 
 - **Galleries** — curated photo sets
 - **Services** — service list and pricing copy
 - **Testimonials**
 - **Videos / Films** — dropped with `backend/db/migrations/2026-11-09-drop-videos.sql`
+- **FAQs** — dropped last, table included, with
+  `backend/db/migrations/2026-11-12-drop-faqs.sql`; the public FAQ page and the
+  admin editor went with it
 
-The public **FAQ** page is also gone (the FAQ API and admin editor remain).
 Two stray files from the original repo were removed: `Music - Shortcut.lnk` and
 the unused `hero.png` / `vite.svg` assets.
 
@@ -141,16 +143,17 @@ session.
 
 ## 5. Database
 
-14 tables:
+13 tables:
 
 `admins`, `categories`, `photos`, `packages`, `package_features`, `bookings`,
-`contact_info`, `about_info`, `faqs`, `social_links`, `site_terms`,
+`contact_info`, `about_info`, `social_links`, `site_terms`,
 `smtp_settings`, `booking_notification_settings`,
 `booking_notification_recipients`.
 
 New since Lens & Light: `site_terms`, `smtp_settings`, the two notification
 tables, plus `booking` columns for terms acceptance and confirmation-email
-tracking. `galleries`, `services`, `testimonials` and `videos` no longer exist.
+tracking. `galleries`, `services`, `testimonials`, `videos` and `faqs` no
+longer exist.
 
 Schema changes are handwritten SQL in `backend/db/migrations/`, applied by hand.
 The Go backend never creates or alters tables.

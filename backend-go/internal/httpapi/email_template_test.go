@@ -242,14 +242,13 @@ func TestRenderAdminNotificationMatchesJavaLayout(t *testing.T) {
 
 	subject, html, text := renderAdminNotification(booking, "Elvove", link, "https://elvove.site")
 
-	if subject != "Booking Baru #42 — Budi Santoso" {
+	if subject != "Booking Baru — Budi Santoso" {
 		t.Errorf("subject = %q", subject)
 	}
 	for _, marker := range []string{
 		`BOOKING BARU`,
 		`Ada Pemesanan Baru`,
-		`>Booking #42 dari Budi Santoso.</td>`,
-		`>#42</td>`,
+		`>Pemesanan baru dari Budi Santoso.</td>`,
 		`>budi@example.com</td>`,
 		`>08123456789</td>`,
 		`>Diterima</td>`,
@@ -262,8 +261,7 @@ func TestRenderAdminNotificationMatchesJavaLayout(t *testing.T) {
 	}
 	for _, marker := range []string{
 		"BOOKING BARU\n\n",
-		"Booking #42 dari Budi Santoso.",
-		"ID Booking        : #42",
+		"Pemesanan baru dari Budi Santoso.",
 		"Email           : budi@example.com",
 		"Status          : Diterima",
 		"Buka panel admin: " + link,

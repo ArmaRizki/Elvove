@@ -20,8 +20,8 @@ import {
 } from "../utils/uploadLimits";
 
 /**
- * Generic CRUD manager used by every simple admin resource (Services, Packages,
- * Testimonials, Videos, FAQs, Categories...). Photos gets its own page since it
+ * Generic CRUD manager used by every simple admin resource (Packages,
+ * Categories, and the singleton editors). Photos gets its own page since it
  * also needs category selection wired to a live list, but follows this same shape.
  *
  * fields: [{ name, label, type: 'text'|'textarea'|'number'|'checkbox'|'image', required }]

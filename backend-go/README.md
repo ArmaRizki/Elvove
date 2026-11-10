@@ -10,11 +10,11 @@ endpoint: responses match, apart from the cases listed at the end of this file.
 
 - PostgreSQL connection pool and health endpoint.
 - Admin login using existing bcrypt hashes and HS256 JWT tokens.
-- Public About, Contact, Terms, Social Links, Categories, Packages, FAQs and
-  Photos read endpoints, including existing filters and response field names.
+- Public About, Contact, Terms, Social Links, Categories, Packages and Photos
+  read endpoints, including existing filters and response field names.
 - Authentication middleware, rate limits for login and booking creation.
 - JSON and error response conventions compatible with the frontend.
-- Admin CRUD for categories, packages, FAQs, photos, and singleton content.
+- Admin CRUD for categories, packages, photos, and singleton content.
 - Booking status transitions, acceptance, rescheduling, and deletion.
 - Multipart image uploads with signature/size checks, WebP variants, and
   private original storage.
@@ -66,8 +66,8 @@ every response carries it without an offset (`2026-11-10T14:02:37`), while
   as 20:54. `internal/store/store_test.go` pins both halves.
 
 Rows written by Java, and every row written since, are WIB. Rows an earlier
-revision of this Go backend wrote through `NOW()` (photos, categories, packages,
-FAQs, and every `updated_at`) were UTC and read 7 hours early. A booking that
+revision of this Go backend wrote through `NOW()` (photos, categories, packages
+and every `updated_at`) were UTC and read 7 hours early. A booking that
 Go created and then updated shows it directly: its `updated_at` is earlier than
 its `created_at`.
 
