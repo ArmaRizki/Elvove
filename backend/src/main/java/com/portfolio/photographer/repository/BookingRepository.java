@@ -1,0 +1,12 @@
+package com.portfolio.photographer.repository;
+
+import com.portfolio.photographer.entity.Booking;
+import com.portfolio.photographer.entity.BookingStatus;
+import org.springframework.data.jpa.repository.JpaRepository;
+
+import java.util.List;
+
+public interface BookingRepository extends JpaRepository<Booking, Long> {
+    List<Booking> findAllByOrderByCreatedAtDesc();
+    List<Booking> findByStatusOrderByCreatedAtDesc(BookingStatus status);
+}

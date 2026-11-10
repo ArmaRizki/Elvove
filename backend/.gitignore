@@ -1,0 +1,9 @@
+target/
+*.class
+*.log
+.mvn/wrapper/maven-wrapper.jar
+.idea/
+*.iml
+.env
+uploads/
+!uploads/.gitkeep

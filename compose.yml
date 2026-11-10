@@ -1,0 +1,95 @@
+services:
+  database:
+    image: postgres:16-alpine
+    container_name: photography-local-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: photographer_portfolio
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD wajib diisi}
+    volumes:
+      - photography-local-db:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d photographer_portfolio"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend-go
+    image: elvove-backend-go:local
+    container_name: photography-local-backend
+    restart: unless-stopped
+    # The uploads bind mount below is owned by root (it was created by the
+    # previous Java container), so the local stack runs as root. The image's own
+    # default user stays non-root (uid 10001) for a production deploy, where
+    # uploads live in a volume the image already chowns.
+    user: "0:0"
+    environment:
+      DB_HOST: database
+      DB_PORT: "5432"
+      DB_NAME: photographer_portfolio
+      DB_USERNAME: postgres
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD wajib diisi}
+      JWT_SECRET: ${JWT_SECRET:?JWT_SECRET wajib diisi}
+      SMTP_ENCRYPTION_KEY: ${SMTP_ENCRYPTION_KEY:?SMTP_ENCRYPTION_KEY wajib diisi}
+      # Comma-separated origins allowed by CORS. Local defaults; set
+      # FRONTEND_URL=https://elvove.site in production (see .env.example).
+      FRONTEND_URL: ${FRONTEND_URL:-http://localhost:8090,http://localhost:5173,http://localhost:5174}
+      # Site address used in the booking e-mail header logo and footer link.
+      MAIL_SITE_URL: ${MAIL_SITE_URL:-http://localhost:8090}
+      # Base of the admin panel; booking notifications link to
+      # {MAIL_ADMIN_URL}/admin/bookings?booking=ID.
+      MAIL_ADMIN_URL: ${MAIL_ADMIN_URL:-http://localhost:8090}
+      # Used only to create the first admin while the admins table is empty,
+      # with the same rules as Java's DataInitializer.
+      ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
+      ADMIN_EMAIL: ${ADMIN_EMAIL:-elvo.vee@gmail.com}
+      ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Upload limits. Both accept size syntax ("50MB", "100MB"). Keep
+      # UPLOAD_MAX_REQUEST_SIZE in step with nginx/default.conf's
+      # client_max_body_size.
+      UPLOAD_MAX_FILE_SIZE: ${UPLOAD_MAX_FILE_SIZE:-50MB}
+      UPLOAD_MAX_REQUEST_SIZE: ${UPLOAD_MAX_REQUEST_SIZE:-100MB}
+    ports:
+      - "127.0.0.1:8080:8080"
+    volumes:
+      - ./local-data/uploads:/app/uploads
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://127.0.0.1:8080/health >/dev/null || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    depends_on:
+      database:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: ./frontend
+    image: elvove-frontend:local
+    container_name: photography-local-frontend
+    restart: unless-stopped
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - backend
+
+  nginx:
+    image: nginx:alpine
+    container_name: photography-local-nginx
+    restart: unless-stopped
+    ports:
+      - "8090:80"
+    volumes:
+      - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
+    depends_on:
+      - frontend
+      - backend
+
+volumes:
+  photography-local-db:

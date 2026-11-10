@@ -1,0 +1,103 @@
+server:
+  port: 8080
+  tomcat:
+    # When an upload is rejected for size, Tomcat otherwise stops reading the
+    # body after 2 MB and drops the connection, so the browser sees a network
+    # error instead of the JSON 413. -1 lets the response reach the client.
+    max-swallow-size: -1
+
+spring:
+  application:
+    name: elvove-photography
+
+  # Booking times are entered and shown in WIB (UTC+7).
+  jackson:
+    time-zone: Asia/Jakarta
+
+  mail:
+    host: ${MAIL_HOST:smtp.gmail.com}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME}
+    password: ${MAIL_PASSWORD}
+    properties:
+      mail:
+        smtp:
+          auth: true
+          starttls:
+            enable: true
+            required: true
+          connectiontimeout: 5000
+          timeout: 5000
+          writetimeout: 5000
+
+  datasource:
+    url: ${DB_URL:jdbc:postgresql://database:5432/photographer_portfolio}
+    username: ${DB_USERNAME:postgres}
+    password: ${DB_PASSWORD}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      ddl-auto: update
+    # Off by default: with show-sql on, every logged-in admin request printed
+    # SQL to the container log, including booking customer data. Enable locally
+    # with JPA_SHOW_SQL=true when debugging.
+    show-sql: ${JPA_SHOW_SQL:false}
+    open-in-view: false
+    properties:
+      hibernate:
+        format_sql: true
+        jdbc:
+          time_zone: Asia/Jakarta
+
+  servlet:
+    multipart:
+      # 50 MB per photo, 100 MB for a request carrying several photos.
+      # Both can be overridden from the environment: Spring accepts the same
+      # human-readable form ("50MB", "100MB").
+      max-file-size: ${UPLOAD_MAX_FILE_SIZE:50MB}
+      max-request-size: ${UPLOAD_MAX_REQUEST_SIZE:100MB}
+      # Never buffer an upload in heap: anything above 0 bytes is written to a
+      # temp file and streamed to disk by FileStorageService.
+      file-size-threshold: 0
+
+app:
+  upload:
+    dir: uploads/
+
+    # Must stay in step with spring.servlet.multipart.max-file-size: this is the
+    # check the service applies itself, so the limit also holds if the container
+    # limit is ever raised or bypassed.
+    max-file-size: ${UPLOAD_MAX_FILE_SIZE:50MB}
+
+  mail:
+    from: ${MAIL_FROM:elvo.vee@gmail.com}
+    from-name: ${MAIL_FROM_NAME:Elvove}
+    # Address shown in the footer of the booking e-mail.
+    site-url: ${MAIL_SITE_URL:https://elvove.site}
+    # Base URL of the admin panel. Booking links in administrator notifications
+    # are built from it as {admin-url}/admin/bookings?booking=ID. Set
+    # MAIL_ADMIN_URL in local development. It must never contain credentials.
+    admin-url: ${MAIL_ADMIN_URL:https://elvove.site}
+
+  jwt:
+    secret: ${JWT_SECRET}
+    expiration-ms: 86400000
+
+  # Used only to create the first admin when the admins table is empty
+  admin:
+    username: ${ADMIN_USERNAME:}
+    email: ${ADMIN_EMAIL:}
+    password: ${ADMIN_PASSWORD:}
+
+  smtp:
+    encryption-key: ${SMTP_ENCRYPTION_KEY}
+
+  cors:
+    allowed-origins: ${FRONTEND_URL:http://localhost:5173}
+
+logging:
+  level:
+    # INFO in production. Set LOG_LEVEL_APP=DEBUG locally when debugging.
+    com.portfolio.photographer: ${LOG_LEVEL_APP:INFO}
+    org.springframework.security: INFO

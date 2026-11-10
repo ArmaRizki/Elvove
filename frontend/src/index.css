@@ -1,0 +1,233 @@
+@import url('https://fonts.googleapis.com/css2?family=IM+Fell+English:ital@0;1&display=swap');
+@import "tailwindcss";
+
+@import "@fontsource/inter/400.css";
+@import "@fontsource/inter/500.css";
+@import "@fontsource/inter/600.css";
+@import "@fontsource/inter/700.css";
+
+@theme {
+  --color-ink: #ffffff;
+  --color-ink-soft: #ffffff;
+  --color-ivory: #111827;
+  --color-ivory-dim: #111827;
+  --color-brass: #E11D48;
+  --color-brass-light: #E11D48;
+  --color-burgundy: #5c2333;
+  --color-line: #e5e7eb;
+
+  --font-display: "Inter", sans-serif;
+  --font-body: "Inter", sans-serif;
+}
+
+html {
+  scroll-behavior: smooth;
+}
+
+body {
+  background-color: var(--color-ink);
+  color: var(--color-ivory);
+  font-family: var(--font-body);
+}
+
+/* Film sprocket-hole divider — the site's signature motif */
+.sprocket-rule {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sprocket-rule::before,
+.sprocket-rule::after {
+  content: "";
+  flex: 1;
+  height: 1px;
+  background: repeating-linear-gradient(
+    90deg,
+    var(--color-line) 0px,
+    var(--color-line) 4px,
+    transparent 4px,
+    transparent 10px
+  );
+}
+
+/* Frame number label, like a negative strip */
+.frame-number::before {
+  content: attr(data-frame);
+  font-family: var(--font-body);
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  color: var(--color-brass);
+  display: block;
+  margin-bottom: 0.5rem;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  * {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+:focus-visible {
+  outline: 2px solid var(--color-brass);
+  outline-offset: 2px;
+}
+
+/* All display headings now use Inter Bold. */
+.font-display {
+  font-family: "Inter", sans-serif;
+  font-weight: 700;
+}
+
+/*
+ * Native date inputs format their text from the browser locale, not from the
+ * document's lang attribute, so Chromium always shows mm/dd/yyyy. The native
+ * text is made transparent and an overlay prints dd/mm/yyyy instead. The
+ * input keeps its native behaviour: keyboard editing and the value (always
+ * YYYY-MM-DD) are untouched. The calendar button is drawn by us (see
+ * .field-icon-button) so it matches the time picker's clock icon.
+ */
+.date-input::-webkit-datetime-edit {
+  color: transparent;
+}
+
+.date-input::-webkit-calendar-picker-indicator {
+  display: none;
+}
+
+.date-input-overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  /* 1rem sama dengan px-4, +1px agar sejajar dengan teks asli yang dimulai
+     setelah border 1px. */
+  padding: 0 calc(1rem + 1px);
+  pointer-events: none;
+  overflow: hidden;
+  white-space: nowrap;
+  color: #6b7280; /* sama dengan placeholder:text-gray-500 */
+}
+
+.date-input-overlay--filled {
+  color: #111827; /* sama dengan text-gray-900 */
+}
+
+/* Saat fokus, teks asli ditampilkan lagi supaya pengetikan terlihat. */
+.date-input:focus::-webkit-datetime-edit {
+  color: #111827;
+}
+
+.date-input:focus + .date-input-overlay {
+  opacity: 0;
+}
+
+/* Peramban tanpa ::-webkit-datetime-edit (mis. Firefox) memakai teks aslinya
+   dan ikon kalendernya sendiri, jadi overlay dan ikon kalender buatan kita
+   disembunyikan. Ikon jam pada time picker tetap ditampilkan. */
+@supports not selector(::-webkit-datetime-edit) {
+  .date-input-overlay {
+    display: none;
+  }
+
+  .date-input-overlay ~ .field-icon-button {
+    display: none;
+  }
+}
+
+/* Label di atas field: kecil, rapat, dan tegas. */
+.field-label {
+  @apply mb-2 block text-xs font-medium uppercase tracking-widest text-gray-500;
+}
+
+/*
+ * Gaya dasar seluruh field formulir: satu sumber kebenaran untuk border,
+ * radius, padding, dan fokus. Brand accent ELVOVE (#E11D48) dipakai sebagai
+ * cincin fokus yang lembut, bukan warna solid yang menusuk.
+ */
+.form-field {
+  @apply w-full rounded-lg border border-gray-200 bg-white px-4 py-3 text-sm
+    text-gray-900 outline-none transition-[border-color,box-shadow,background-color]
+    duration-150;
+}
+
+.form-field::placeholder {
+  @apply text-gray-500;
+}
+
+.form-field:hover:not(:disabled) {
+  @apply border-gray-300;
+}
+
+.form-field:focus {
+  @apply border-[#E11D48];
+  box-shadow: 0 0 0 3px rgb(225 29 72 / 0.12);
+}
+
+.form-field:focus-visible {
+  outline: none;
+}
+
+.form-field:disabled {
+  @apply cursor-not-allowed bg-gray-50 text-gray-400;
+}
+
+.form-field[aria-invalid="true"] {
+  @apply border-[#E11D48];
+}
+
+/* Field dengan ikon di kanan: ruang ekstra agar teks tidak bertabrakan. */
+.form-field--icon {
+  @apply pr-12;
+}
+
+/*
+ * Select memakai panah sendiri supaya proporsinya sama dengan ikon jam dan
+ * kalender, dan tidak lagi terlihat seperti kontrol bawaan browser.
+ */
+.form-select {
+  @apply cursor-pointer appearance-none pr-11;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='%239CA3AF' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 1rem center;
+  background-size: 17px 17px;
+}
+
+.form-select:focus {
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='17' height='17' viewBox='0 0 24 24' fill='none' stroke='%23E11D48' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E");
+}
+
+.form-select option {
+  color: #111827;
+  background-color: #ffffff;
+}
+
+/* Ikon di dalam field: rata tengah vertikal dan jauh dari tepi. */
+.field-icon-button {
+  position: absolute;
+  right: 13px;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.5rem;
+  height: 1.5rem;
+  border-radius: 9999px;
+  color: #9ca3af;
+  cursor: pointer;
+  transition: color 150ms ease, background-color 150ms ease;
+}
+
+/* Ikon ikut berubah warna saat field di-hover. Ikon berada di samping
+   field (bukan di dalamnya), jadi hover diambil dari induknya. */
+.field-with-icon:hover .field-icon-button {
+  color: #e11d48;
+}
+
+.field-icon-button:hover {
+  color: #e11d48;
+  background-color: #fff1f2;
+}

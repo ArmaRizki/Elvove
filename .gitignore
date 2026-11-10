@@ -1,0 +1,84 @@
+# Environment secrets
+.env
+.env.*
+!.env.example
+backend/.env
+frontend/.env
+
+# Dependencies
+node_modules/
+frontend/node_modules/
+
+# Build output
+dist/
+build/
+frontend/dist/
+backend/target/
+
+# Local application data
+local-data/
+backend/uploads/
+
+# Database and local backups
+*.sql
+# …but keep versioned schema migrations
+!backend/db/migrations/
+!backend/db/migrations/*.sql
+*.dump
+*.bak
+*.backup-*
+.backup-*/
+.elvove-*-backup*/
+.elvove-style-backup-*/
+.rebrand-backup*/
+backup-*/
+backup-thumbnail/
+backup-terms-*/
+
+# Archives and temporary files
+*.tar
+*.tar.gz
+*.tgz
+*.log
+logs/
+*.pid
+*.orig
+*.rej
+elvove-source.txt
+
+# Local database dumps and exports (never commit data)
+/migration/
+
+# Test and coverage artifacts
+coverage/
+frontend/coverage/
+test-results/
+playwright-report/
+.vite/
+
+# Agent tooling (local only, never committed)
+.opencode/
+
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Windows metadata and shortcuts
+*.Zone.Identifier
+*.lnk
+Thumbs.db
+
+# macOS
+.DS_Store
+
+# IDE
+.idea/
+*.iml
+.vscode/
+
+# Temporary maintenance scripts and scratch files
+/e logs*
+/e up*
+/main
+/rebrand-elvove.py
+
