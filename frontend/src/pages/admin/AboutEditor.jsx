@@ -3,10 +3,10 @@ import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import ImageUploadField from "../../components/admin/ImageUploadField";
+import RichTextEditor from "../../components/admin/RichTextEditor";
+import { toHtml } from "../../utils/richText";
 import {
   adminCard,
-  adminInput,
-  adminLabel,
   adminPrimaryButton,
 } from "../../components/admin/adminStyles";
 
@@ -25,7 +25,8 @@ export default function AboutEditor() {
   useEffect(() => {
     adminApi
       .getAbout()
-      .then((res) => setForm(res.data))
+      // Older rows hold Markdown; the editor works on HTML.
+      .then((res) => setForm({ ...res.data, story: toHtml(res.data.story, { softBreaks: true }) }))
       .catch(() => setNotice({ type: "error", text: "Gagal memuat halaman Tentang Kami." }));
   }, []);
 
@@ -76,18 +77,14 @@ export default function AboutEditor() {
 
       <form onSubmit={handleSubmit} className={`${adminCard} space-y-6`}>
         <div>
-          <label className={adminLabel} htmlFor="about-story">CERITA</label>
-          <textarea
+          <RichTextEditor
             id="about-story"
-            rows={8}
+            label="CERITA"
             value={form.story || ""}
-            onChange={(e) => setForm({ ...form, story: e.target.value })}
-            className={adminInput}
-            placeholder="Tulis cerita Elvove di sini."
+            onChange={(story) => setForm((current) => ({ ...current, story }))}
+            hint="Cerita tampil paling atas pada halaman Tentang Kami."
+            minHeight="18rem"
           />
-          <p className="mt-2 text-xs text-gray-500">
-            Cerita tampil paling atas pada halaman Tentang Kami.
-          </p>
         </div>
 
         <ImageUploadField

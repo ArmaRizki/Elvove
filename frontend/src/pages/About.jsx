@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { publicApi } from "../services/publicApi";
 import SectionHeading from "../components/SectionHeading";
 import LoadingState from "../components/LoadingState";
+import RichTextContent from "../components/RichTextContent";
 import { getImageUrl } from "../utils/imageUrl";
 
 export default function About() {
@@ -28,9 +29,7 @@ export default function About() {
       <div className="grid md:grid-cols-2 gap-10 md:gap-14 items-start">
         <div>
           {story ? (
-            <p className="whitespace-pre-line text-justify text-base leading-7 text-gray-700">
-              {story}
-            </p>
+            <RichTextContent value={story} softBreaks className="text-justify" />
           ) : (
             <p className="text-justify text-base leading-7 text-gray-700">
               Cerita belum ditambahkan.

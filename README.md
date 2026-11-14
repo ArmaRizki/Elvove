@@ -100,8 +100,14 @@ terms-and-conditions.
 - A booking records `terms_accepted`, `terms_accepted_at` and `terms_version`.
 - Saving different content bumps the version; if the version the client accepted
   is stale, the API answers `409` and asks them to review the new text.
-- Admin editor with Markdown rendering, plus a public `/terms-and-conditions`
-  page.
+- Admin rich-text editor for both the About story and the terms themselves
+  (headings, bold/italic/underline, font size, alignment, lists, quotes, links).
+  The text is stored as HTML and sanitized with DOMPurify on the public page;
+  older Markdown rows are converted when the editor loads them. In the terms,
+  each Heading 1 starts a new column on `/terms-and-conditions`.
+- `about_info.story` became `text` in
+  `backend/db/migrations/2026-11-15-about-story-text.sql`: the HTML markup of the
+  same prose already exceeded the old varchar(3000).
 
 ### E-mail settings
 
@@ -172,8 +178,9 @@ The Go backend never creates or alters tables.
 - New admin screens: calendar, Terms editor, SMTP settings.
 - Shared `AdminResourceManager` for the simple CRUD lists, plus `AdminLayout`,
   `EmptyState`, `LoadingState`, `CustomTimePicker` and `WhatsAppButton`.
-- `utils/bookingTime.js`, `utils/termsMarkdown.jsx` and `utils/uploadLimits.js`
-  keep time handling, Markdown rendering and the upload-size hints in one place.
+- `utils/bookingTime.js`, `utils/richText.js` and `utils/uploadLimits.js` keep
+  time handling, rich-text HTML (Markdown upgrade + sanitizing) and the
+  upload-size hints in one place.
 
 ---
 

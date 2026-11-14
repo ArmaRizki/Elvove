@@ -231,3 +231,72 @@ body {
   color: #e11d48;
   background-color: #fff1f2;
 }
+
+/*
+ * Rich text: the About story and the Terms content are HTML written in the
+ * admin editor. The editor and the public pages share this class, so the admin
+ * sees the same shapes visitors get. Inline styles (font size, alignment) come
+ * from the editor and win over these rules.
+ */
+.rich-text {
+  @apply text-base leading-7 text-gray-700 break-words;
+}
+
+.rich-text > * + * {
+  @apply mt-4;
+}
+
+.rich-text h1 {
+  @apply font-display text-xl font-bold text-gray-900 md:text-2xl;
+}
+
+.rich-text h2 {
+  @apply font-display text-lg font-bold text-gray-900;
+}
+
+.rich-text h3,
+.rich-text h4,
+.rich-text h5,
+.rich-text h6 {
+  @apply font-display text-base font-bold text-gray-900;
+}
+
+.rich-text ul {
+  @apply list-disc pl-6;
+}
+
+.rich-text ol {
+  @apply list-decimal pl-6;
+}
+
+.rich-text li + li {
+  @apply mt-2;
+}
+
+.rich-text li > p {
+  @apply mt-0;
+}
+
+.rich-text li::marker {
+  color: #e11d48;
+}
+
+.rich-text blockquote {
+  @apply border-l-2 border-[#E11D48] pl-4 italic text-gray-600;
+}
+
+.rich-text a {
+  @apply text-[#E11D48] underline underline-offset-4;
+}
+
+.rich-text strong {
+  @apply font-semibold text-gray-900;
+}
+
+.rich-text hr {
+  @apply border-gray-200;
+}
+
+.rich-text:focus {
+  outline: none;
+}

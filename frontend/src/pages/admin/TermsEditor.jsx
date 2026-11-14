@@ -2,6 +2,8 @@ import { useEffect, useState } from "react";
 import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
+import RichTextEditor from "../../components/admin/RichTextEditor";
+import { toHtml, isEmptyHtml } from "../../utils/richText";
 import {
   adminCard,
   adminInput,
@@ -27,7 +29,8 @@ export default function TermsEditor() {
   async function loadTerms() {
     try {
       const { data } = await adminApi.getTerms();
-      setForm(data);
+      // Older rows hold Markdown; the editor works on HTML.
+      setForm({ ...data, content: toHtml(data.content) });
     } catch (error) {
       setNotice({
         type: "error",
@@ -46,7 +49,7 @@ export default function TermsEditor() {
   }
 
   async function handleSave() {
-    if (!form.title.trim() || !form.content.trim()) {
+    if (!form.title.trim() || isEmptyHtml(form.content)) {
       setNotice({ type: "error", text: "Judul dan isi wajib diisi." });
       return;
     }
@@ -61,7 +64,7 @@ export default function TermsEditor() {
         title: form.title,
         content: form.content,
       });
-      setForm(data);
+      setForm({ ...data, content: toHtml(data.content) });
       setNotice({ type: "success", text: "Syarat dan Ketentuan berhasil disimpan dan diterbitkan." });
     } catch (error) {
       setNotice({
@@ -101,18 +104,13 @@ export default function TermsEditor() {
         </div>
 
         <div>
-          <label className={adminLabel} htmlFor="terms-content">ISI SYARAT DAN KETENTUAN (MARKDOWN)</label>
-          <p className="mb-2 mt-1 text-xs text-gray-500">
-            # Judul, ## Subjudul, **tebal**, - daftar butir, 1. daftar bernomor.
-          </p>
-          <textarea
+          <RichTextEditor
             id="terms-content"
-            name="content"
+            label="ISI SYARAT DAN KETENTUAN"
             value={form.content}
-            onChange={handleChange}
-            rows={18}
-            spellCheck={false}
-            className={`${adminInput} font-mono text-xs leading-relaxed sm:text-sm`}
+            onChange={(content) => setForm((current) => ({ ...current, content }))}
+            hint="Setiap Judul 1 memulai kolom baru pada halaman publik. Gunakan Judul 2 dan Judul 3 untuk sub-bagian."
+            minHeight="24rem"
           />
         </div>
 
