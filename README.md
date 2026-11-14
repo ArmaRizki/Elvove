@@ -81,7 +81,9 @@ terms-and-conditions.
 - Statuses are `PENDING`, `ACCEPTED`, `RESCHEDULE_REQUESTED`, `COMPLETED`, with
   an explicit transition allow-list. `COMPLETED` is terminal.
 - Accepting a booking only changes the status; the confirmation e-mail is a
-  separate, explicit action so it can be retried.
+  separate, explicit action so it can be retried. It carries a payment card:
+  the 50% down payment worked out from the package price, the BCA account, and
+  the static QRIS code at `/qris.png`.
 - Confirmation and reschedule e-mails are tracked
   (`confirmation_email_sent_at`, `confirmation_email_count`) and written only
   after SMTP accepts the message, so a failure leaves the row retryable.

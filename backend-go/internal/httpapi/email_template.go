@@ -77,6 +77,7 @@ func renderBookingConfirmation(b bookingEmail, senderName, senderEmail, siteURL 
 			"Terima kasih telah memilih "+brand+". Kami telah menerima dan mengonfirmasi booking Anda. "+
 				"Berikut adalah detail reservasi Anda.") +
 		emailDetailsCard(b) +
+		emailPaymentBlock(b, siteURL) +
 		emailNextStepsBlock() +
 		emailContactButton(contact, siteURL)
 
@@ -90,6 +91,7 @@ func renderBookingConfirmation(b bookingEmail, senderName, senderEmail, siteURL 
 	text.WriteString("Berikut adalah detail reservasi Anda.\n\n")
 	text.WriteString("DETAIL BOOKING\n")
 	text.WriteString(emailDetailLines(b))
+	text.WriteString("\n" + emailPaymentLines(b.PackagePrice, siteURL))
 	text.WriteString("\nLANGKAH SELANJUTNYA\n")
 	text.WriteString(emailStepsText())
 	text.WriteString("\nElvove\n")
@@ -251,6 +253,11 @@ func emailLogoURL(siteURL string) string {
 	return strings.TrimRight(siteURL, "/") + "/logo.png"
 }
 
+// The static QRIS code, served from the same public folder as the logo.
+func emailQRISURL(siteURL string) string {
+	return strings.TrimRight(siteURL, "/") + "/qris.png"
+}
+
 // White body of the card.
 func emailContentBlock(body string) string {
 	return "<tr><td style=\"background:" + emailCard + ";border:1px solid " + emailBorder + ";border-top:none;" +
@@ -317,14 +324,70 @@ func emailDetailsCard(b bookingEmail) string {
 		emailDetailRow("Lokasi", emailOneLine(b.EventLocation), false, false) +
 		emailDetailRow("Paket", emailOneLine(b.PackageTitle), false, false) +
 		emailDetailRow("Total Harga", emailRupiah(b.PackagePrice), false, true) +
-		// The down payment and the remaining balance are agreed with the
-		// client, so they are shown as pending rather than as a figure the
-		// booking does not hold.
-		emailDetailRow("DP (Uang Muka)", emailPending, false, true) +
-		emailDetailRow("Sisa Pembayaran", emailPending, true, true) +
+		// The down payment is half the package price, so it is derived rather
+		// than stored; without a price both figures stay pending.
+		emailDetailRow("DP 50% (Uang Muka)", emailDownPayment(b.PackagePrice), false, true) +
+		emailDetailRow("Sisa Pembayaran", emailRemainingBalance(b.PackagePrice), true, true) +
 		"</table>" +
 		"</td></tr></table>"
 }
+
+// The payment card: what to pay now, the account to pay it into, and the
+// static QRIS code. Everything is centred, which keeps the short values —
+// an account number, a scan code — easy to read on a phone.
+func emailPaymentBlock(b bookingEmail, siteURL string) string {
+	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
+		"style=\"width:100%;border-collapse:collapse;\">" +
+		"<tr><td style=\"padding:18px 0 0 0;\">" +
+		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
+		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailInfoBg + ";\">" +
+		"<tr><td align=\"center\" style=\"padding:20px 18px 0 18px;font-family:" + emailFont + ";font-size:11px;" +
+		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailMuted + ";\">" +
+		"PEMBAYARAN" +
+		"</td></tr>" +
+		// The amount to pay now, the one figure the customer must read.
+		"<tr><td align=\"center\" style=\"padding:14px 18px 0 18px;\">" +
+		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" align=\"center\" " +
+		"style=\"margin:0 auto;\">" +
+		"<tr><td align=\"center\" style=\"background:" + emailCard + ";border:1px solid " + emailBorder +
+		";border-radius:8px;padding:14px 26px;font-family:" + emailFont + ";\">" +
+		"<div style=\"font-size:11px;line-height:16px;letter-spacing:1.2px;font-weight:700;" +
+		"color:" + emailMuted + ";\">DP 50% DIBAYAR SEKARANG</div>" +
+		"<div style=\"padding:4px 0 0 0;font-size:24px;line-height:32px;font-weight:700;" +
+		"color:" + emailBrandRed + ";\">" + emailDownPayment(b.PackagePrice) + "</div>" +
+		"</td></tr></table>" +
+		"</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:16px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
+		"line-height:18px;color:" + emailMuted + ";\">Transfer BCA</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:2px 18px 0 18px;font-family:" + emailFont + ";font-size:22px;" +
+		"line-height:30px;font-weight:700;letter-spacing:1px;color:" + emailDark + ";\">" +
+		emailBankAccount +
+		"</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:2px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
+		"line-height:18px;color:" + emailMuted + ";\">a.n. " + emailBankHolder + "</td></tr>" +
+		// The QRIS code is a static image, so it is loaded from the site the
+		// same way the header logo is; data: URIs are stripped by Gmail.
+		"<tr><td align=\"center\" style=\"padding:16px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
+		"line-height:18px;color:" + emailMuted + ";\">atau scan QRIS</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:10px 18px 0 18px;\">" +
+		"<img src=\"" + emailEscape(emailQRISURL(siteURL)) + "\" width=\"220\" alt=\"QRIS Elvove\" " +
+		"style=\"display:block;width:220px;max-width:100%;height:auto;border:0;outline:none;" +
+		"text-decoration:none;margin:0 auto;\">" +
+		"</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:8px 18px 20px 18px;font-family:" + emailFont + ";font-size:11px;" +
+		"line-height:17px;color:" + emailMuted + ";\">" +
+		emailQRISMerchant + " &middot; NMID " + emailQRISNMID +
+		"</td></tr>" +
+		"</table>" +
+		"</td></tr></table>"
+}
+
+const (
+	emailBankAccount  = "8025325911"
+	emailBankHolder   = "Leonardus Seco Patu Sila Anggara"
+	emailQRISMerchant = "ELVOVE - ART"
+	emailQRISNMID     = "ID1026639151079"
+)
 
 // The admin booking card: customer contact, then the event details.
 func emailAdminDetailsCard(b bookingEmail) string {
@@ -422,11 +485,9 @@ func emailNextStepsBlock() string {
 		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailBrandRed + ";\">" +
 		"LANGKAH SELANJUTNYA" +
 		"</td></tr>" +
-		emailStepRow("Tim kami akan menghubungi Anda untuk mengonfirmasi down payment (DP) dan menyepakati "+
-			"jadwal sesi foto.") +
-		emailStepRow("Mohon siapkan konfirmasi mengenai paket, durasi, dan kebutuhan khusus untuk sesi Anda.") +
-		emailStepRow("Datang tepat waktu di lokasi yang telah disepakati agar sesi berjalan optimal.") +
-		emailStepRow("Punya pertanyaan atau perlu mengubah jadwal? Balas email ini, tim kami siap membantu.") +
+		emailStepRow("Bayar DP 50% lewat transfer BCA atau QRIS.") +
+		emailStepRow("Datang tepat waktu di lokasi yang disepakati.") +
+		emailStepRow("Perlu ubah jadwal atau ada pertanyaan? Balas email ini.") +
 		"</table>" +
 		"</td>" +
 		"</tr>" +
@@ -510,8 +571,8 @@ func emailDetailLines(b bookingEmail) string {
 		"Lokasi          : " + emailOneLine(b.EventLocation) + "\n" +
 		"Paket           : " + emailOneLine(b.PackageTitle) + "\n" +
 		"Total Harga     : " + emailRupiah(b.PackagePrice) + "\n" +
-		"DP (Uang Muka)  : " + emailPending + "\n" +
-		"Sisa Pembayaran : " + emailPending + "\n"
+		"DP 50%          : " + emailDownPayment(b.PackagePrice) + "\n" +
+		"Sisa Pembayaran : " + emailRemainingBalance(b.PackagePrice) + "\n"
 }
 
 func emailAdminDetailLines(b bookingEmail) string {
@@ -535,11 +596,19 @@ func emailStatusLabel(status string) string {
 }
 
 func emailStepsText() string {
-	return "• Tim kami akan menghubungi Anda untuk mengonfirmasi down payment (DP) dan menyepakati jadwal " +
-		"sesi foto.\n" +
-		"• Mohon siapkan konfirmasi mengenai paket, durasi, dan kebutuhan khusus untuk sesi Anda.\n" +
-		"• Datang tepat waktu di lokasi yang telah disepakati agar sesi berjalan optimal.\n" +
-		"• Punya pertanyaan atau perlu mengubah jadwal? Balas email ini, tim kami siap membantu.\n"
+	return "• Bayar DP 50% lewat transfer BCA atau QRIS.\n" +
+		"• Datang tepat waktu di lokasi yang disepakati.\n" +
+		"• Perlu ubah jadwal atau ada pertanyaan? Balas email ini.\n"
+}
+
+// emailPaymentLines is the plain-text twin of emailPaymentBlock.
+func emailPaymentLines(price, siteURL string) string {
+	return "PEMBAYARAN\n" +
+		"DP 50%          : " + emailDownPayment(price) + " (dibayar sekarang)\n" +
+		"Transfer BCA    : " + emailBankAccount + "\n" +
+		"Atas Nama       : " + emailBankHolder + "\n" +
+		"QRIS            : " + emailQRISURL(siteURL) + "\n" +
+		"                  " + emailQRISMerchant + ", NMID " + emailQRISNMID + "\n"
 }
 
 func emailPreview(b bookingEmail, headline string) string {
@@ -600,6 +669,37 @@ func emailRupiah(value string) string {
 	}
 	// Java's DecimalFormat default is HALF_EVEN, the same as RoundToEven.
 	return "Rp" + emailGroupDigits(int64(math.RoundToEven(amount)))
+}
+
+// emailDownPayment renders half the package price, the DP the customer pays to
+// secure the session. Java left this row pending; the amount is now fixed at
+// 50%, so it is derived from the price.
+func emailDownPayment(price string) string {
+	amount, ok := emailAmount(price)
+	if !ok {
+		return emailPending
+	}
+	return "Rp" + emailGroupDigits(int64(math.RoundToEven(amount/2)))
+}
+
+// emailRemainingBalance is the other half, settled after the session.
+func emailRemainingBalance(price string) string {
+	amount, ok := emailAmount(price)
+	if !ok {
+		return emailPending
+	}
+	total := int64(math.RoundToEven(amount))
+	down := int64(math.RoundToEven(amount / 2))
+	return "Rp" + emailGroupDigits(total-down)
+}
+
+// emailAmount parses a package price, reporting whether it holds a number.
+func emailAmount(price string) (float64, bool) {
+	amount, err := strconv.ParseFloat(strings.TrimSpace(price), 64)
+	if err != nil {
+		return 0, false
+	}
+	return amount, true
 }
 
 func emailGroupDigits(number int64) string {

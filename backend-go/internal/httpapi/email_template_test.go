@@ -62,10 +62,27 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 		"Jakarta Selatan",
 		"Premium",
 		"Rp2.000.000",
-		"Akan dikonfirmasi",
+		// Half the package price is the DP; the balance is the other half.
+		"Rp1.000.000",
 	} {
 		if !strings.Contains(html, marker) {
 			t.Errorf("html missing booking value %q", marker)
+		}
+	}
+
+	// The payment card: bank transfer details and the hosted QRIS image.
+	for _, marker := range []string{
+		`PEMBAYARAN`,
+		`DP 50% DIBAYAR SEKARANG`,
+		`Transfer BCA`,
+		`>8025325911</td>`,
+		`a.n. Leonardus Seco Patu Sila Anggara`,
+		`src="https://elvove.site/qris.png"`,
+		`atau scan QRIS`,
+		`ELVOVE - ART &middot; NMID ID1026639151079`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("html missing payment marker %q", marker)
 		}
 	}
 
@@ -76,7 +93,13 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 		"Nama Pemesan    : Budi Santoso",
 		"Tanggal Booking : 9 November 2026",
 		"Total Harga     : Rp2.000.000",
-		"Sisa Pembayaran : Akan dikonfirmasi",
+		"DP 50%          : Rp1.000.000",
+		"Sisa Pembayaran : Rp1.000.000",
+		"PEMBAYARAN",
+		"DP 50%          : Rp1.000.000 (dibayar sekarang)",
+		"Transfer BCA    : 8025325911",
+		"Atas Nama       : Leonardus Seco Patu Sila Anggara",
+		"QRIS            : https://elvove.site/qris.png",
 		"LANGKAH SELANJUTNYA",
 	} {
 		if !strings.Contains(text, marker) {
@@ -136,9 +159,10 @@ func TestRenderBookingConfirmationMissingValuesUsePendingMarker(t *testing.T) {
 
 	// The HTML card renders each pending value in its own table cell, so only
 	// the marker itself is asserted there: five card rows (date, time, total,
-	// down payment, balance) plus the hidden inbox preview line.
-	if count := strings.Count(html, emailPending); count != 6 {
-		t.Errorf("html pending markers = %d, want 6", count)
+	// down payment, balance), the amount due in the payment card, plus the
+	// hidden inbox preview line.
+	if count := strings.Count(html, emailPending); count != 7 {
+		t.Errorf("html pending markers = %d, want 7", count)
 	}
 	for _, label := range []string{"Tanggal Booking", "Waktu Sesi", "Total Harga"} {
 		if !strings.Contains(html, ">"+label+"</td>") {
@@ -174,6 +198,25 @@ func TestEmailHelpers(t *testing.T) {
 	}
 	if got := emailOneLine(" A\nB\tC "); got != "A B C" {
 		t.Errorf("emailOneLine = %q", got)
+	}
+	if got := emailDownPayment("2000000.00"); got != "Rp1.000.000" {
+		t.Errorf("emailDownPayment = %q", got)
+	}
+	// An odd price keeps the two halves adding up to the total.
+	if got := emailDownPayment("1000001"); got != "Rp500.000" {
+		t.Errorf("emailDownPayment odd = %q", got)
+	}
+	if got := emailRemainingBalance("1000001"); got != "Rp500.001" {
+		t.Errorf("emailRemainingBalance odd = %q", got)
+	}
+	if got := emailDownPayment(""); got != emailPending {
+		t.Errorf("emailDownPayment empty = %q", got)
+	}
+	if got := emailRemainingBalance("bukan angka"); got != emailPending {
+		t.Errorf("emailRemainingBalance invalid = %q", got)
+	}
+	if got := emailQRISURL("https://elvove.site/"); got != "https://elvove.site/qris.png" {
+		t.Errorf("emailQRISURL = %q", got)
 	}
 	if got := emailLogoURL("https://elvove.site/"); got != "https://elvove.site/logo.png" {
 		t.Errorf("emailLogoURL = %q", got)
