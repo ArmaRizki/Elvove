@@ -84,6 +84,19 @@ func TestMessageEmbedsImagesInline(t *testing.T) {
 	}
 }
 
+// A message that only shows the logo must not drag the QR code along.
+func TestOnlyReferencedImagesAreAttached(t *testing.T) {
+	subject, htmlBody, textBody := renderBookingReschedule(sampleBooking(), "Elvove", "elvo.vee@gmail.com", "https://elvove.site")
+	message := buildMIMEMessage("Elvove <elvo.vee@gmail.com>", "budi@example.com", "elvo.vee@gmail.com",
+		subject, htmlBody, textBody)
+	if !strings.Contains(message, "Content-ID: <"+emailLogoCID+">") {
+		t.Error("reschedule message is missing the logo")
+	}
+	if strings.Contains(message, "Content-ID: <"+emailQRISCID+">") {
+		t.Error("reschedule message carries the QRIS code it never shows")
+	}
+}
+
 // A plain-text-only message needs no related part, and must not grow one.
 func TestPlainTextMessageHasNoRelatedPart(t *testing.T) {
 	message := buildMIMEMessage("a@b.c", "d@e.f", "a@b.c", "Halo", "", "halo")

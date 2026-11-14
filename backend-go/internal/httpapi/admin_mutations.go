@@ -758,7 +758,13 @@ func buildMIMEMessage(from, to, senderEmail, subject, htmlBody, textBody string)
 	fmt.Fprintf(&body, "--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", alternative, base64.StdEncoding.EncodeToString([]byte(textBody)))
 	fmt.Fprintf(&body, "\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", alternative, base64.StdEncoding.EncodeToString([]byte(htmlBody)))
 	fmt.Fprintf(&body, "\r\n--%s--\r\n", alternative)
+	// Only the images this message actually references are attached: an unused
+	// part shows up as an attachment in some clients and makes the message
+	// heavier for nothing.
 	for _, image := range emailInlineImages() {
+		if !strings.Contains(htmlBody, emailImageSource(image.ID)) {
+			continue
+		}
 		fmt.Fprintf(&body, "--%s\r\nContent-Type: %s\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <%s>\r\nContent-Disposition: inline; filename=\"%s.png\"\r\n\r\n%s",
 			related, image.ContentType, image.ID, image.ID, base64Lines(image.Data))
 	}
