@@ -25,8 +25,10 @@ endpoint: responses match, apart from the cases listed at the end of this file.
   rendered from `internal/httpapi/email_template.go`, a direct port of the Java
   `BookingEmailTemplate`: table-based HTML with inline CSS, hidden inbox preview
   line, escaped booking values, plain-text alternative part,
-  `multipart/alternative` message, RFC 2047 subject encoding and `Reply-To` set
-  to the configured sender address.
+  `multipart/alternative` message, RFC 2047 subject encoding, `Reply-To` set to
+  the configured sender address, and `Date`/`Message-ID` headers written the way
+  JavaMail writes them (`Date` in WIB, `Message-ID` on the sender's domain) —
+  without those two, Gmail and spam filters delay or bin the message.
 - First-admin bootstrap from `ADMIN_USERNAME`/`ADMIN_EMAIL`/`ADMIN_PASSWORD`,
   run only while the `admins` table is empty, with Java's password rules.
 
@@ -42,6 +44,10 @@ endpoint: responses match, apart from the cases listed at the end of this file.
 - The sender display name and address come from the `smtp_settings` table, as
   Java's `SmtpMailService.getSenderName()`/`getSenderEmail()` do; the brand name
   falls back to `Elvove` when SMTP is not configured yet.
+- A failed administrator notification is retried up to three times with a
+  growing pause unless the server answered 5xx (which means it refused the
+  message outright); every skip and every failure is logged with the booking id
+  and the cause, while the recipient address stays out of the log.
 - Missing booking values (`event_time`, `package_title`, `package_price`,
   `event_location`, unset dates) render as "Akan dikonfirmasi" instead of
   failing the query, matching the Java template.

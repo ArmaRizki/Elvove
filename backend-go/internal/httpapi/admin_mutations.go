@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"net/mail"
 	"net/smtp"
+	"net/textproto"
 	"net/url"
 	"os"
 	"os/exec"
@@ -716,25 +717,46 @@ func (s *Server) sendSMTPMessage(r *http.Request, to, subject, htmlBody, textBod
 	if e != nil {
 		return e
 	}
-	subjectHeader := mimeWord(subject)
-	// Replies go back to the same business inbox the message came from, the
-	// same way Java's MimeMessageHelper.setReplyTo does.
-	replyTo := ""
-	if address := strings.TrimSpace(c.SenderEmail); address != "" {
-		replyTo = fmt.Sprintf("Reply-To: %s\r\n", address)
-	}
-	var message string
-	if htmlBody == "" {
-		message = fmt.Sprintf("From: %s\r\nTo: %s\r\n%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", from, to, replyTo, subjectHeader, base64.StdEncoding.EncodeToString([]byte(textBody)))
-	} else {
-		boundary := "elvove-alternative-" + newUploadID()
-		message = fmt.Sprintf("From: %s\r\nTo: %s\r\n%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s--\r\n", from, to, replyTo, subjectHeader, boundary, boundary, base64.StdEncoding.EncodeToString([]byte(textBody)), boundary, base64.StdEncoding.EncodeToString([]byte(htmlBody)), boundary)
-	}
+	message := buildMIMEMessage(from, to, c.SenderEmail, subject, htmlBody, textBody)
 	if _, e = io.WriteString(writer, message); e != nil {
 		writer.Close()
 		return e
 	}
 	return writer.Close()
+}
+
+// buildMIMEMessage assembles the message sendSMTPMessage hands to the server.
+// Date and Message-ID are set explicitly because JavaMail always adds them and
+// their absence makes Gmail and spam filters hold the message back.
+func buildMIMEMessage(from, to, senderEmail, subject, htmlBody, textBody string) string {
+	subjectHeader := mimeWord(subject)
+	// Replies go back to the same business inbox the message came from, the
+	// same way Java's MimeMessageHelper.setReplyTo does.
+	replyTo := ""
+	if address := strings.TrimSpace(senderEmail); address != "" {
+		replyTo = fmt.Sprintf("Reply-To: %s\r\n", address)
+	}
+	// WIB, because the JVM this replaced ran with Asia/Jakarta as its default
+	// zone and JavaMail stamped Date there. WallClock re-tags as UTC for the
+	// database, so the offset is formatted explicitly.
+	headers := "Date: " + time.Now().In(jakartaZone).Format(time.RFC1123Z) + "\r\n" +
+		"Message-ID: <" + newUploadID() + "@" + messageIDDomain(senderEmail) + ">\r\n"
+	if htmlBody == "" {
+		return fmt.Sprintf("From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", from, to, replyTo, headers, subjectHeader, base64.StdEncoding.EncodeToString([]byte(textBody)))
+	}
+	boundary := "elvove-alternative-" + newUploadID()
+	return fmt.Sprintf("From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s--\r\n", from, to, replyTo, headers, subjectHeader, boundary, boundary, base64.StdEncoding.EncodeToString([]byte(textBody)), boundary, base64.StdEncoding.EncodeToString([]byte(htmlBody)), boundary)
+}
+
+// messageIDDomain uses the sender's domain, falling back to the site host, so a
+// Message-ID is always well formed even when SMTP has no address configured.
+func messageIDDomain(senderEmail string) string {
+	if _, domain, ok := strings.Cut(strings.TrimSpace(senderEmail), "@"); ok {
+		if domain = strings.TrimSpace(domain); domain != "" {
+			return domain
+		}
+	}
+	return "elvove.site"
 }
 
 // mimeWord encodes a header value as an RFC 2047 encoded-word when it holds
@@ -860,16 +882,27 @@ func (s *Server) notifyBookingAdmins(r *http.Request, id int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var enabled bool
-	if err := s.Store.Pool.QueryRow(ctx, `SELECT enabled FROM booking_notification_settings WHERE id=1`).Scan(&enabled); err != nil || !enabled {
+	if err := s.Store.Pool.QueryRow(ctx, `SELECT enabled FROM booking_notification_settings WHERE id=1`).Scan(&enabled); err != nil {
+		log.Printf("Notifikasi booking #%d dilewati: pengaturan notifikasi tidak terbaca: %v", id, err)
+		return
+	}
+	if !enabled {
 		return
 	}
 	recipients, err := s.Store.QueryRows(ctx, `SELECT email FROM booking_notification_recipients ORDER BY id`)
 	if err != nil {
+		log.Printf("Notifikasi booking #%d dilewati: daftar penerima tidak terbaca: %v", id, err)
+		return
+	}
+	if len(recipients) == 0 {
+		// Java logs the same warning; without it an empty list looks like a bug.
+		log.Printf("Notifikasi booking #%d dilewati: notifikasi aktif tetapi daftar penerima kosong", id)
 		return
 	}
 	b := bookingEmail{ID: id}
 	if err = s.Store.Pool.QueryRow(ctx, `SELECT name,email,phone,to_char(event_date,'YYYY-MM-DD'),COALESCE(to_char(event_time,'HH24:MI'),''),COALESCE(event_location,''),COALESCE(package_title,''),COALESCE(package_price::text,''),status FROM bookings WHERE id=$1`, id).
 		Scan(&b.Name, &b.Email, &b.Phone, &b.EventDate, &b.EventTime, &b.EventLocation, &b.PackageTitle, &b.PackagePrice, &b.Status); err != nil {
+		log.Printf("Notifikasi booking #%d dilewati: data booking tidak terbaca: %v", id, err)
 		return
 	}
 	link, err := adminBookingURL(s.Config.MailAdminURL, id)
@@ -883,11 +916,47 @@ func (s *Server) notifyBookingAdmins(r *http.Request, id int64) {
 	subject, htmlBody, textBody := renderAdminNotification(b, s.mailSenderName(mailReq), link, s.Config.SiteURL)
 	for _, recipient := range recipients {
 		email, _ := recipient["email"].(string)
-		if err := s.sendSMTPMessage(mailReq, email, subject, htmlBody, textBody); err != nil {
-			// Java logs the failure class only: no address, no SMTP details.
-			log.Printf("Notifikasi booking #%d gagal dikirim ke satu penerima", id)
+		if err := sendWithRetry(func() error {
+			return s.sendSMTPMessage(mailReq, email, subject, htmlBody, textBody)
+		}); err != nil {
+			// One recipient failing must not stop the others. The address is
+			// left out of the log; the cause is kept so the failure is
+			// diagnosable instead of silent.
+			log.Printf("Notifikasi booking #%d gagal dikirim ke satu penerima: %v", id, err)
 		}
 	}
+}
+
+// retryBackoff is a variable so tests do not wait out the real delay.
+var retryBackoff = 2 * time.Second
+
+// sendWithRetry retries a transient SMTP failure a few times. Gmail answers 421
+// and drops idle connections, so a single attempt loses the notification for
+// good. A rejection of the address itself is not retried.
+func sendWithRetry(send func() error) error {
+	var err error
+	for attempt := 1; attempt <= 3; attempt++ {
+		if err = send(); err == nil {
+			return nil
+		}
+		if isPermanentSMTPError(err) {
+			return err
+		}
+		if attempt < 3 {
+			time.Sleep(time.Duration(attempt) * retryBackoff)
+		}
+	}
+	return err
+}
+
+// isPermanentSMTPError reports a 5xx answer: the server has already refused
+// the message, so sending it again only repeats the same rejection.
+func isPermanentSMTPError(err error) bool {
+	var protoErr *textproto.Error
+	if errors.As(err, &protoErr) {
+		return protoErr.Code >= 500
+	}
+	return false
 }
 
 // adminBookingURL mirrors BookingLinks.adminBookingUrl: the configured base is
