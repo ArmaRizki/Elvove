@@ -728,6 +728,11 @@ func (s *Server) sendSMTPMessage(r *http.Request, to, subject, htmlBody, textBod
 // buildMIMEMessage assembles the message sendSMTPMessage hands to the server.
 // Date and Message-ID are set explicitly because JavaMail always adds them and
 // their absence makes Gmail and spam filters hold the message back.
+//
+// When there is an HTML body the message is multipart/related: the alternative
+// part carries text and HTML, and the images the HTML references by
+// "cid:" are attached beside it. Mail clients block remote images by default,
+// so the logo and the QR code have to travel with the message.
 func buildMIMEMessage(from, to, senderEmail, subject, htmlBody, textBody string) string {
 	subjectHeader := mimeWord(subject)
 	// Replies go back to the same business inbox the message came from, the
@@ -744,8 +749,21 @@ func buildMIMEMessage(from, to, senderEmail, subject, htmlBody, textBody string)
 	if htmlBody == "" {
 		return fmt.Sprintf("From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", from, to, replyTo, headers, subjectHeader, base64.StdEncoding.EncodeToString([]byte(textBody)))
 	}
-	boundary := "elvove-alternative-" + newUploadID()
-	return fmt.Sprintf("From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s\r\n--%s--\r\n", from, to, replyTo, headers, subjectHeader, boundary, boundary, base64.StdEncoding.EncodeToString([]byte(textBody)), boundary, base64.StdEncoding.EncodeToString([]byte(htmlBody)), boundary)
+	alternative := "elvove-alternative-" + newUploadID()
+	related := "elvove-related-" + newUploadID()
+	var body strings.Builder
+	fmt.Fprintf(&body, "From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\n", from, to, replyTo, headers, subjectHeader)
+	fmt.Fprintf(&body, "Content-Type: multipart/related; boundary=\"%s\"; type=\"multipart/alternative\"\r\n\r\n", related)
+	fmt.Fprintf(&body, "--%s\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", related, alternative)
+	fmt.Fprintf(&body, "--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", alternative, base64.StdEncoding.EncodeToString([]byte(textBody)))
+	fmt.Fprintf(&body, "\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", alternative, base64.StdEncoding.EncodeToString([]byte(htmlBody)))
+	fmt.Fprintf(&body, "\r\n--%s--\r\n", alternative)
+	for _, image := range emailInlineImages() {
+		fmt.Fprintf(&body, "--%s\r\nContent-Type: %s\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <%s>\r\nContent-Disposition: inline; filename=\"%s.png\"\r\n\r\n%s",
+			related, image.ContentType, image.ID, image.ID, base64Lines(image.Data))
+	}
+	fmt.Fprintf(&body, "--%s--\r\n", related)
+	return body.String()
 }
 
 // messageIDDomain uses the sender's domain, falling back to the site host, so a

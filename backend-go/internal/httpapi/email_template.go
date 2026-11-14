@@ -239,18 +239,13 @@ func emailHeaderBlock(siteURL string) string {
 		"<td valign=\"middle\" style=\"vertical-align:middle;padding:0 12px 0 0;width:44px;\">" +
 		// Decorative: the brand name beside it is the readable text, so a
 		// blocked image leaves no clipped alt text behind.
-		"<img src=\"" + emailEscape(emailLogoURL(siteURL)) + "\" width=\"44\" height=\"44\" alt=\"\" " +
+		"<img src=\"" + emailImageSource(emailLogoCID) + "\" width=\"44\" height=\"44\" alt=\"\" " +
 		"style=\"display:block;width:44px;height:44px;border:0;outline:none;text-decoration:none;\">" +
 		"</td>" +
 		"<td valign=\"middle\" style=\"vertical-align:middle;font-family:" + emailFont + ";font-size:22px;" +
 		"line-height:44px;font-weight:700;letter-spacing:2px;color:" + emailBrandRed + ";\">ELVOVE</td>" +
 		"</tr></table>" +
 		"</td></tr>"
-}
-
-// The public logo on the site; email clients load it over HTTPS.
-func emailLogoURL(siteURL string) string {
-	return strings.TrimRight(siteURL, "/") + "/logo.png"
 }
 
 // The static QRIS code, served from the same public folder as the logo.
@@ -370,7 +365,7 @@ func emailPaymentBlock(b bookingEmail, siteURL string) string {
 		"<tr><td align=\"center\" style=\"padding:16px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
 		"line-height:18px;color:" + emailMuted + ";\">atau scan QRIS</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:10px 18px 0 18px;\">" +
-		"<img src=\"" + emailEscape(emailQRISURL(siteURL)) + "\" width=\"220\" alt=\"QRIS Elvove\" " +
+		"<img src=\"" + emailImageSource(emailQRISCID) + "\" width=\"220\" alt=\"QRIS Elvove\" " +
 		"style=\"display:block;width:220px;max-width:100%;height:auto;border:0;outline:none;" +
 		"text-decoration:none;margin:0 auto;\">" +
 		"</td></tr>" +

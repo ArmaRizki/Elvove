@@ -26,8 +26,10 @@ endpoint: responses match, apart from the cases listed at the end of this file.
   `BookingEmailTemplate`: table-based HTML with inline CSS, hidden inbox preview
   line, escaped booking values, plain-text alternative part,
   a payment card with the 50% down payment (derived from the package price),
-  the BCA account to transfer to, and the static QRIS code served at
-  `/qris.png`; `multipart/alternative` message, RFC 2047 subject encoding, `Reply-To` set to
+  the BCA account to transfer to, and the static QRIS code; the logo and the
+  QRIS image are embedded in the message (`internal/httpapi/assets`, attached
+  as `multipart/related` with a `Content-ID`, referenced as `cid:`), because
+  mail clients block remote images by default; RFC 2047 subject encoding, `Reply-To` set to
   the configured sender address, and `Date`/`Message-ID` headers written the way
   JavaMail writes them (`Date` in WIB, `Message-ID` on the sender's domain) —
   without those two, Gmail and spam filters delay or bin the message.

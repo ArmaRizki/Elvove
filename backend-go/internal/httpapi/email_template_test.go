@@ -39,7 +39,7 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 
 	// Header, card, footer and the interactive blocks.
 	for _, marker := range []string{
-		`src="https://elvove.site/logo.png"`,
+		`src="cid:elvove-logo"`,
 		`>ELVOVE</td>`,
 		`PESANAN DITERIMA`,
 		`Booking Anda Telah Dikonfirmasi`,
@@ -77,7 +77,7 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 		`Transfer BCA`,
 		`>8025325911</td>`,
 		`a.n. Leonardus Seco Patu Sila Anggara`,
-		`src="https://elvove.site/qris.png"`,
+		`src="cid:elvove-qris"`,
 		`atau scan QRIS`,
 		`ELVOVE - ART &middot; NMID ID1026639151079`,
 	} {
@@ -217,9 +217,6 @@ func TestEmailHelpers(t *testing.T) {
 	}
 	if got := emailQRISURL("https://elvove.site/"); got != "https://elvove.site/qris.png" {
 		t.Errorf("emailQRISURL = %q", got)
-	}
-	if got := emailLogoURL("https://elvove.site/"); got != "https://elvove.site/logo.png" {
-		t.Errorf("emailLogoURL = %q", got)
 	}
 }
 
