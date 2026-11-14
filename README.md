@@ -88,8 +88,8 @@ terms-and-conditions.
 - Rescheduling stores the new date/time and sends a notification to the client.
 - New bookings notify the configured administrators, after the transaction
   commits, without delaying the customer or rolling back the booking. A failed
-  send is retried three times, and every skip or failure is logged with the
-  booking id and the cause.
+  send is retried three times, and the outcome (sent count, skip or failure) is
+  logged with the booking id.
 - Admin calendar view and a custom time picker for schedule changes.
 
 ### Terms & Conditions

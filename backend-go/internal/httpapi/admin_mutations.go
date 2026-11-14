@@ -914,6 +914,7 @@ func (s *Server) notifyBookingAdmins(r *http.Request, id int64) {
 	// goroutine outlives the handler that started it.
 	mailReq := &http.Request{}
 	subject, htmlBody, textBody := renderAdminNotification(b, s.mailSenderName(mailReq), link, s.Config.SiteURL)
+	sent := 0
 	for _, recipient := range recipients {
 		email, _ := recipient["email"].(string)
 		if err := sendWithRetry(func() error {
@@ -923,8 +924,13 @@ func (s *Server) notifyBookingAdmins(r *http.Request, id int64) {
 			// left out of the log; the cause is kept so the failure is
 			// diagnosable instead of silent.
 			log.Printf("Notifikasi booking #%d gagal dikirim ke satu penerima: %v", id, err)
+			continue
 		}
+		sent++
 	}
+	// Without a line on success, "no notification log" cannot be told apart
+	// from "notification never ran".
+	log.Printf("Notifikasi booking #%d terkirim ke %d/%d penerima", id, sent, len(recipients))
 }
 
 // retryBackoff is a variable so tests do not wait out the real delay.

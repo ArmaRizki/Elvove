@@ -46,8 +46,8 @@ endpoint: responses match, apart from the cases listed at the end of this file.
   falls back to `Elvove` when SMTP is not configured yet.
 - A failed administrator notification is retried up to three times with a
   growing pause unless the server answered 5xx (which means it refused the
-  message outright); every skip and every failure is logged with the booking id
-  and the cause, while the recipient address stays out of the log.
+  message outright); every skip, every failure and the delivered count are
+  logged with the booking id, while the recipient address stays out of the log.
 - Missing booking values (`event_time`, `package_title`, `package_price`,
   `event_location`, unset dates) render as "Akan dikonfirmasi" instead of
   failing the query, matching the Java template.
