@@ -29,7 +29,7 @@ export default function About() {
       <div className="grid md:grid-cols-2 gap-10 md:gap-14 items-start">
         <div>
           {story ? (
-            <RichTextContent value={story} softBreaks className="text-justify" />
+            <RichTextContent value={story} softBreaks />
           ) : (
             <p className="text-justify text-base leading-7 text-gray-700">
               Cerita belum ditambahkan.
