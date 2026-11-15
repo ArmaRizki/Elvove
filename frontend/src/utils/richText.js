@@ -117,12 +117,18 @@ export function toHtml(value, options) {
   return sanitizeHtml(HTML_PATTERN.test(text) ? text : markdownToHtml(text, options));
 }
 
-// Splits rendered HTML at each top-level <h1>, the way the Terms page splits
-// its two-column grid. Content before the first heading is its own section.
-export function splitHtmlSections(html) {
+// Splits rendered HTML into the blocks the Terms page lays out in columns.
+// `boundary` picks where a new block starts: at each top-level <h1> (the
+// original behaviour) or at each <hr>, which the editor inserts through the
+// "Pisah kolom" button and which is then dropped, because it marks the break
+// instead of drawing a rule. Content before the first break is its own block.
+export function splitHtmlSections(html, boundary = "heading") {
   const body = new DOMParser().parseFromString(html, "text/html").body;
   const sections = [];
   let current = [];
+
+  const isBreak = (node) =>
+    node.nodeType === 1 && (boundary === "marker" ? node.tagName === "HR" : node.tagName === "H1");
 
   const flush = () => {
     if (current.length > 0) {
@@ -132,7 +138,11 @@ export function splitHtmlSections(html) {
   };
 
   Array.from(body.childNodes).forEach((node) => {
-    if (node.nodeType === 1 && node.tagName === "H1" && current.length > 0) flush();
+    if (isBreak(node)) {
+      flush();
+      // A marker only divides the content; a heading also opens the new block.
+      if (boundary === "marker") return;
+    }
     current.push(node);
   });
   flush();

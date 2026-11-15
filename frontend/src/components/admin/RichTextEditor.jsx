@@ -16,6 +16,7 @@ import {
   Quote,
   Redo2,
   RemoveFormatting,
+  SeparatorHorizontal,
   Strikethrough,
   Underline,
   Undo2,
@@ -81,7 +82,7 @@ const selectClass =
  * Rich-text field for long page copy. It stores HTML; every page that shows the
  * content renders it through toHtml() in utils/richText.js.
  */
-export default function RichTextEditor({ id, label, hint, value, onChange, minHeight = "16rem" }) {
+export default function RichTextEditor({ id, label, hint, value, onChange, minHeight = "16rem", columnBreak = false }) {
   const editor = useEditor({
     extensions: [
       StarterKit.configure({
@@ -199,6 +200,15 @@ export default function RichTextEditor({ id, label, hint, value, onChange, minHe
               <option key={size} value={size}>{text}</option>
             ))}
           </select>
+
+          {columnBreak && (
+            <ToolButton
+              label="Pisah kolom"
+              onClick={() => chain().setHorizontalRule().run()}
+            >
+              <SeparatorHorizontal size={15} />
+            </ToolButton>
+          )}
 
           <Divider />
 

@@ -1296,9 +1296,13 @@ func (s *Server) updateSocialLinks(w http.ResponseWriter, r *http.Request) {
 }
 func (s *Server) updateTerms(w http.ResponseWriter, r *http.Request) {
 	var req struct {
-		Title        string `json:"title"`
-		Introduction string `json:"introduction"`
-		Content      string `json:"content"`
+		Title string `json:"title"`
+		// Nil keeps the stored introduction: the admin page does not edit it.
+		Introduction  *string `json:"introduction"`
+		Content       string  `json:"content"`
+		LayoutColumns int     `json:"layoutColumns"`
+		LayoutWidth   string  `json:"layoutWidth"`
+		LayoutSplit   string  `json:"layoutSplit"`
 	}
 	if !decodeJSON(w, r, &req) {
 		return
@@ -1310,6 +1314,16 @@ func (s *Server) updateTerms(w http.ResponseWriter, r *http.Request) {
 	}
 	if strings.TrimSpace(req.Content) == "" {
 		fieldErrors["content"] = "must not be blank"
+	}
+	// The layout values come from three fixed choices in the admin page.
+	if req.LayoutColumns != 1 && req.LayoutColumns != 2 {
+		fieldErrors["layoutColumns"] = "must be 1 or 2"
+	}
+	if req.LayoutWidth != "equal" && req.LayoutWidth != "wide-left" && req.LayoutWidth != "wide-right" {
+		fieldErrors["layoutWidth"] = "must be equal, wide-left or wide-right"
+	}
+	if req.LayoutSplit != "heading" && req.LayoutSplit != "marker" {
+		fieldErrors["layoutSplit"] = "must be heading or marker"
 	}
 	if len(fieldErrors) > 0 {
 		writeValidationError(w, fieldErrors)
@@ -1323,17 +1337,24 @@ func (s *Server) updateTerms(w http.ResponseWriter, r *http.Request) {
 	defer tx.Rollback(r.Context())
 	var id int64
 	var title, introduction, content, version string
+	var layoutColumns int
+	var layoutWidth, layoutSplit string
 	var updated time.Time
-	err := tx.QueryRow(r.Context(), `SELECT id,title,COALESCE(introduction,''),content,version,updated_at FROM site_terms ORDER BY id LIMIT 1 FOR UPDATE`).Scan(&id, &title, &introduction, &content, &version, &updated)
+	err := tx.QueryRow(r.Context(), `SELECT id,title,COALESCE(introduction,''),content,version,layout_columns,layout_width,layout_split,updated_at FROM site_terms ORDER BY id LIMIT 1 FOR UPDATE`).Scan(&id, &title, &introduction, &content, &version, &layoutColumns, &layoutWidth, &layoutSplit, &updated)
+	if req.Introduction == nil {
+		req.Introduction = &introduction
+	}
 	if errors.Is(err, pgx.ErrNoRows) {
 		version = "1"
-		err = tx.QueryRow(r.Context(), `INSERT INTO site_terms(title,introduction,content,version,created_at,updated_at) VALUES($1,$2,$3,$4,NOW(),NOW()) RETURNING id,title,introduction,content,version,updated_at`, req.Title, req.Introduction, req.Content, version).Scan(&id, &title, &introduction, &content, &version, &updated)
+		err = tx.QueryRow(r.Context(), `INSERT INTO site_terms(title,introduction,content,version,layout_columns,layout_width,layout_split,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7,NOW(),NOW()) RETURNING id,title,introduction,content,version,layout_columns,layout_width,layout_split,updated_at`, req.Title, *req.Introduction, req.Content, version, req.LayoutColumns, req.LayoutWidth, req.LayoutSplit).Scan(&id, &title, &introduction, &content, &version, &layoutColumns, &layoutWidth, &layoutSplit, &updated)
 	} else if err == nil {
-		if title != req.Title || nullableDeref(&introduction) != req.Introduction || content != req.Content {
+		// A layout change is not a content change, so it keeps the terms version
+		// the bookings accepted.
+		if title != req.Title || nullableDeref(&introduction) != *req.Introduction || content != req.Content {
 			n, _ := strconv.Atoi(version)
 			version = strconv.Itoa(n + 1)
 		}
-		err = tx.QueryRow(r.Context(), `UPDATE site_terms SET title=$1,introduction=$2,content=$3,version=$4,updated_at=NOW() WHERE id=$5 RETURNING id,title,introduction,content,version,updated_at`, req.Title, req.Introduction, req.Content, version, id).Scan(&id, &title, &introduction, &content, &version, &updated)
+		err = tx.QueryRow(r.Context(), `UPDATE site_terms SET title=$1,introduction=$2,content=$3,version=$4,layout_columns=$5,layout_width=$6,layout_split=$7,updated_at=NOW() WHERE id=$8 RETURNING id,title,introduction,content,version,layout_columns,layout_width,layout_split,updated_at`, req.Title, *req.Introduction, req.Content, version, req.LayoutColumns, req.LayoutWidth, req.LayoutSplit, id).Scan(&id, &title, &introduction, &content, &version, &layoutColumns, &layoutWidth, &layoutSplit, &updated)
 	}
 	if err != nil {
 		writeError(w, 500, "Terms could not be saved.")
@@ -1343,7 +1364,7 @@ func (s *Server) updateTerms(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "Terms could not be saved.")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"id": id, "title": title, "introduction": introduction, "content": content, "version": version, "updatedAt": updated})
+	writeJSON(w, 200, map[string]any{"id": id, "title": title, "introduction": introduction, "content": content, "version": version, "layoutColumns": layoutColumns, "layoutWidth": layoutWidth, "layoutSplit": layoutSplit, "updatedAt": updated})
 }
 
 func (s *Server) updateBookingStatus(w http.ResponseWriter, r *http.Request) {

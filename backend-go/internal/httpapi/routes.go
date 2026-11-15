@@ -204,11 +204,11 @@ func (s *Server) getContact(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getTerms(w http.ResponseWriter, r *http.Request) {
-	row, err := s.Store.QueryOne(r.Context(), `SELECT id, title, introduction, content, version, updated_at AS "updatedAt" FROM site_terms ORDER BY id LIMIT 1`)
+	row, err := s.Store.QueryOne(r.Context(), `SELECT id, title, introduction, content, version, layout_columns AS "layoutColumns", layout_width AS "layoutWidth", layout_split AS "layoutSplit", updated_at AS "updatedAt" FROM site_terms ORDER BY id LIMIT 1`)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Java's TermsService.get() persists the default row, so the first read
 		// answers with an id and a timestamp like every later one.
-		row, err = s.Store.QueryOne(r.Context(), `INSERT INTO site_terms(title,introduction,content,version,created_at,updated_at) VALUES($1,$2,$3,'1',$4,$4) RETURNING id,title,introduction,content,version,updated_at AS "updatedAt"`, "Terms & Conditions", defaultTermsIntroduction, defaultTermsContent, nowWallClock())
+		row, err = s.Store.QueryOne(r.Context(), `INSERT INTO site_terms(title,introduction,content,version,created_at,updated_at) VALUES($1,$2,$3,'1',$4,$4) RETURNING id,title,introduction,content,version,layout_columns AS "layoutColumns",layout_width AS "layoutWidth",layout_split AS "layoutSplit",updated_at AS "updatedAt"`, "Terms & Conditions", defaultTermsIntroduction, defaultTermsContent, nowWallClock())
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat data.")

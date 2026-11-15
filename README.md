@@ -103,11 +103,18 @@ terms-and-conditions.
 - Admin rich-text editor for both the About story and the terms themselves
   (headings, bold/italic/underline, font size, alignment, lists, quotes, links).
   The text is stored as HTML and sanitized with DOMPurify on the public page;
-  older Markdown rows are converted when the editor loads them. In the terms,
-  each Heading 1 starts a new column on `/terms-and-conditions`.
+  older Markdown rows are converted when the editor loads them.
+- The column layout of `/terms-and-conditions` is set in `/admin/terms` and
+  stored in `site_terms.layout_columns` (1 or 2), `layout_width`
+  (`equal`, `wide-left`, `wide-right`) and `layout_split`: `heading` starts a
+  new column at each Heading 1, `marker` only at a "Pisah kolom" marker the
+  editor inserts as `<hr>` (the marker itself is not printed). Columns stack on
+  phones. A layout change does not bump `version`, so accepted bookings are not
+  invalidated by it.
 - `about_info.story` became `text` in
   `backend/db/migrations/2026-11-15-about-story-text.sql`: the HTML markup of the
-  same prose already exceeded the old varchar(3000).
+  same prose already exceeded the old varchar(3000). The terms layout columns
+  come from `backend/db/migrations/2026-11-15-terms-layout.sql`.
 
 ### E-mail settings
 
