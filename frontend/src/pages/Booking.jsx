@@ -2,8 +2,8 @@ import { useEffect, useState } from "react";
 import { publicApi } from "../services/publicApi";
 import SectionHeading from "../components/SectionHeading";
 import CustomTimePicker from "../components/CustomTimePicker";
-import { formatDateDisplay, isQuarterHour, todayIso } from "../utils/bookingTime";
-import { CalendarDays } from "lucide-react";
+import CustomDatePicker from "../components/CustomDatePicker";
+import { isQuarterHour, todayIso } from "../utils/bookingTime";
 import { Link } from "react-router-dom";
 
 const initialForm = {
@@ -24,71 +24,6 @@ const formatPrice = (price) =>
     currency: "IDR",
     maximumFractionDigits: 0,
   }).format(price);
-
-/**
- * Field tanggal dengan ikon kalender sendiri.
- *
- * Ikon bawaan browser disembunyikan (lihat index.css) supaya ukurannya
- * konsisten dengan ikon jam di sebelahnya. Tombol ini memanggil
- * `showPicker()` bila peramban mendukungnya, sehingga kalender aslinya tetap
- * terbuka seperti biasa.
- */
-function DateField({ id, value, min, invalid, describedBy, onChange, className = "" }) {
-  const openPicker = (event) => {
-    const input = event.currentTarget.parentElement?.querySelector("input");
-
-    // Fokus dulu supaya segmen tanggal bisa langsung diketik, lalu kalender
-    // aslinya dibuka.
-    input?.focus();
-
-    if (typeof input?.showPicker === "function") {
-      try {
-        input.showPicker();
-      } catch {
-        // showPicker ditolak di beberapa konteks; fokus di atas sudah cukup.
-      }
-    }
-  };
-
-  return (
-    <div className="relative field-with-icon">
-      <input
-        id={id}
-        type="date"
-        aria-label="Tanggal acara"
-        aria-invalid={Boolean(invalid)}
-        aria-describedby={describedBy}
-        min={min}
-        value={value}
-        onChange={onChange}
-        className={`${className} date-input form-field--icon`}
-      />
-
-      {/* Chromium memakai format tanggal dari locale browser, bukan atribut
-          lang, sehingga selalu tampil mm/dd/yyyy. Teks asli disembunyikan dan
-          diganti dd/mm/yyyy. Saat fokus, teks asli kembali tampil agar
-          pengetikan tetap terlihat. */}
-      <span
-        aria-hidden="true"
-        className={`date-input-overlay text-base sm:text-sm ${
-          value ? "date-input-overlay--filled" : ""
-        }`}
-      >
-        {formatDateDisplay(value) || "dd/mm/yyyy"}
-      </span>
-
-      <button
-        type="button"
-        className="field-icon-button"
-        aria-label="Buka kalender"
-        aria-haspopup="dialog"
-        onClick={openPicker}
-      >
-        <CalendarDays size={17} aria-hidden="true" />
-      </button>
-    </div>
-  );
-}
 
 export default function Booking() {
   const [form, setForm] = useState(initialForm);
@@ -219,17 +154,18 @@ export default function Booking() {
     }
   };
 
-  // Jam dan menit dipilih lewat CustomTimePicker; nilainya tetap "HH:mm".
-  const handleTimeChange = (value) => {
+  // Tanggal dan jam dipilih lewat komponen sendiri (CustomDatePicker,
+  // CustomTimePicker), jadi nilainya berupa string, bukan event.
+  const handlePickerChange = (field) => (value) => {
     setForm((prev) => ({
       ...prev,
-      eventTime: value,
+      [field]: value,
     }));
 
-    if (errors.eventTime) {
+    if (errors[field]) {
       setErrors((prev) => ({
         ...prev,
-        eventTime: undefined,
+        [field]: undefined,
       }));
     }
   };
@@ -425,14 +361,14 @@ export default function Booking() {
                 <label htmlFor="eventDate" className="field-label">
                   Tanggal acara
                 </label>
-                <DateField
+                <CustomDatePicker
                   id="eventDate"
                   value={form.eventDate}
                   min={minDate}
                   invalid={Boolean(errors.eventDate)}
                   describedBy={errors.eventDate ? "eventDate-error" : undefined}
-                  onChange={handleChange("eventDate")}
-                  className={inputClass}
+                  onChange={handlePickerChange("eventDate")}
+                  className={`${inputClass} form-field--icon`}
                 />
                 {errors.eventDate && (
                   <p id="eventDate-error" className={errorClass}>
@@ -448,7 +384,7 @@ export default function Booking() {
                 <CustomTimePicker
                   id="eventTime"
                   value={form.eventTime}
-                  onChange={handleTimeChange}
+                  onChange={handlePickerChange("eventTime")}
                   invalid={Boolean(errors.eventTime)}
                   describedBy={errors.eventTime ? "eventTime-error" : undefined}
                   className={`${inputClass} form-field--icon`}
