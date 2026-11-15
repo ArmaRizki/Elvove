@@ -1443,7 +1443,11 @@ func (s *Server) transitionBooking(w http.ResponseWriter, r *http.Request, id in
 		writeError(w, 400, `Pemesanan sudah berstatus "`+statusLabel(current)+`".`)
 		return false
 	}
-	allowed := map[string][]string{"PENDING": {"ACCEPTED", "RESCHEDULE_REQUESTED"}, "ACCEPTED": {"COMPLETED", "RESCHEDULE_REQUESTED"}, "RESCHEDULE_REQUESTED": {"ACCEPTED", "COMPLETED"}}
+	// The schedule is locked once the customer has agreed to it: an ACCEPTED
+	// booking only moves forward to COMPLETED, and a COMPLETED one does not move
+	// at all. A reschedule therefore has to start while the booking is still
+	// waiting for a decision.
+	allowed := map[string][]string{"PENDING": {"ACCEPTED", "RESCHEDULE_REQUESTED"}, "ACCEPTED": {"COMPLETED"}, "RESCHEDULE_REQUESTED": {"ACCEPTED", "COMPLETED"}}
 	valid := false
 	for _, next := range allowed[current] {
 		if next == target {
@@ -1537,14 +1541,13 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "Booking could not be rescheduled.")
 		return
 	}
-	if current != "RESCHEDULE_REQUESTED" {
-		// Java allows this only from PENDING or ACCEPTED; anything else reports
-		// the same transition message as validateTransition.
-		valid := current == "PENDING" || current == "ACCEPTED"
-		if !valid {
-			writeError(w, 400, fmt.Sprintf(`Status pemesanan tidak dapat diubah dari "%s" menjadi "%s".`, statusLabel(current), statusLabel("RESCHEDULE_REQUESTED")))
-			return
-		}
+	// The agreed schedule no longer moves: only a booking still waiting for a
+	// decision (PENDING) or for the customer to agree to a new date
+	// (RESCHEDULE_REQUESTED) may be rescheduled. ACCEPTED and COMPLETED are
+	// refused here as well, so the rule holds even if the admin panel is bypassed.
+	if current != "PENDING" && current != "RESCHEDULE_REQUESTED" {
+		writeError(w, 400, fmt.Sprintf(`Status pemesanan tidak dapat diubah dari "%s" menjadi "%s".`, statusLabel(current), statusLabel("RESCHEDULE_REQUESTED")))
+		return
 	}
 	var newStatus string
 	if err := tx.QueryRow(r.Context(), `UPDATE bookings SET event_date=$1,event_time=$2,status='RESCHEDULE_REQUESTED',updated_at=NOW() WHERE id=$3 RETURNING status`, date, clock.Format("15:04:05"), id).Scan(&newStatus); err != nil {

@@ -173,9 +173,9 @@ CREATED=$(curl -s -X POST "$BASE/api/bookings" -H 'Content-Type: application/jso
 assert_json 'created booking echoes WIB timestamps without a zone' "$CREATED" "isinstance(d.get('id'),int) and not d['createdAt'].endswith('Z') and 'T' in d['createdAt']"
 
 log '7. Reschedule rolls back when SMTP fails'
-# rescheduleBooking only accepts PENDING or ACCEPTED (Java allows exactly those),
-# so booking 2 (COMPLETED) must be refused for its status before any mail is
-# attempted. Asserting it here keeps the next phase honest about which row it uses.
+# rescheduleBooking accepts only PENDING or RESCHEDULE_REQUESTED: an ACCEPTED
+# booking has an agreed schedule, and a COMPLETED one is closed. Both must be
+# refused for their status, before any mail is attempted.
 COMPLETED_BODY=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
   -H 'Content-Type: application/json' -d '{"eventDate":"2030-02-01","eventTime":"09:00"}' \
   "$BASE/api/admin/bookings/2/reschedule")
@@ -183,6 +183,17 @@ assert_json 'COMPLETED cannot be rescheduled (transition guard, not mail)' "$COM
   "'tidak dapat diubah' in d['message'] and 'Selesai' in d['message']"
 docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -q \
   -c "update bookings set status='ACCEPTED' where id=1;" >/dev/null
+ACCEPTED_BODY=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" \
+  -H 'Content-Type: application/json' -d '{"eventDate":"2030-02-01","eventTime":"09:00"}' \
+  "$BASE/api/admin/bookings/1/reschedule")
+assert_json 'ACCEPTED cannot be rescheduled either' "$ACCEPTED_BODY" \
+  "'tidak dapat diubah' in d['message'] and 'Diterima' in d['message']"
+assert_json 'ACCEPTED cannot be set back to RESCHEDULE_REQUESTED' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"status":"RESCHEDULE_REQUESTED"}' "$BASE/api/admin/bookings/1/status")" \
+  "d['status']==400 and 'tidak dapat diubah' in d['message']"
+docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -q \
+  -c "update bookings set status='PENDING' where id=1;" >/dev/null
 BEFORE=$(docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -tAc \
   "select status||'|'||event_date||'|'||event_time from bookings where id=1;")
 docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -q \

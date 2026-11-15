@@ -20,7 +20,7 @@ This README records what changed.
 | Content modules | Galleries, Services, Testimonials, Videos | Removed; replaced by Terms, SMTP and booking-notification settings |
 | Public pages | 14 | 10 |
 | Admin sections | 13 | 11 (new: calendar, Terms, SMTP; 5 modules gone) |
-| Booking flow | `PENDING → CONTACTED → COMPLETED` | `PENDING → ACCEPTED → RESCHEDULE_REQUESTED → COMPLETED` |
+| Booking flow | `PENDING → CONTACTED → COMPLETED` | `PENDING → ACCEPTED → COMPLETED`, with `RESCHEDULE_REQUESTED` only while the date is not yet agreed |
 | E-mail | none | SMTP stored in DB, confirmation, reschedule and admin notifications |
 | Uploads | 10 MB, extension check only | 50/100 MB, magic-byte check, WebP thumbnail + preview, original admin-only |
 | First admin | hard-coded `admin` / `admin123` | env bootstrap, only while the table is empty, with Java's password rules |
@@ -79,6 +79,9 @@ terms-and-conditions.
 
 - Statuses are `PENDING`, `ACCEPTED`, `RESCHEDULE_REQUESTED`, `COMPLETED`, with
   an explicit transition allow-list. `COMPLETED` is terminal.
+- The schedule is locked once the customer has agreed to it. A reschedule can
+  only start from `PENDING` or `RESCHEDULE_REQUESTED`; `ACCEPTED` moves on to
+  `COMPLETED` only, and `COMPLETED` does not move at all.
 - Accepting a booking only changes the status; the confirmation e-mail is a
   separate, explicit action so it can be retried. It carries a payment card:
   the 50% down payment worked out from the package price, the BCA account, and

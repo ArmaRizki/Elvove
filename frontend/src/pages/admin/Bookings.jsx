@@ -29,6 +29,17 @@ function StatusBadge({ status }) {
   );
 }
 
+// Mirrors the server's transition table (transitionBooking). An ACCEPTED booking
+// only moves on to COMPLETED, so the agreed schedule cannot be reopened; a
+// COMPLETED one does not change at all. Offering a status the API refuses would
+// only produce an error message.
+const NEXT_STATUSES = {
+  PENDING: ["ACCEPTED", "RESCHEDULE_REQUESTED"],
+  ACCEPTED: ["COMPLETED"],
+  RESCHEDULE_REQUESTED: ["ACCEPTED", "COMPLETED"],
+  COMPLETED: [],
+};
+
 export default function Bookings() {
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -336,16 +347,25 @@ export default function Bookings() {
                 <select
                   id="booking-status"
                   value={selected.status}
-                  disabled={statusSaving}
+                  disabled={statusSaving || (NEXT_STATUSES[selected.status] || []).length === 0}
                   onChange={(event) => changeStatus(event.target.value)}
                   className="mt-1 w-full border border-gray-200 bg-transparent px-3 py-2.5 text-sm text-gray-900 focus:border-[#E11D48] outline-none disabled:opacity-60 sm:max-w-xs"
                 >
-                  {STATUS_OPTIONS.map((option) => (
+                  {STATUS_OPTIONS.filter(
+                    (option) =>
+                      option.value === selected.status ||
+                      (NEXT_STATUSES[selected.status] || []).includes(option.value)
+                  ).map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.label}
                     </option>
                   ))}
                 </select>
+                {(NEXT_STATUSES[selected.status] || []).length === 0 && (
+                  <p className="mt-2 text-xs text-gray-500">
+                    Pemesanan selesai tidak dapat diubah lagi.
+                  </p>
+                )}
                 {statusSaving && (
                   <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
                     <LoaderCircle size={14} className="animate-spin" />
