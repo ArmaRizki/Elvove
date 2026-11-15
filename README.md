@@ -21,7 +21,7 @@ This README records what changed.
 | Public pages | 14 | 10 |
 | Admin sections | 13 | 11 (new: calendar, Terms, SMTP; 5 modules gone) |
 | Booking flow | `PENDING → CONTACTED → COMPLETED` | `PENDING → ACCEPTED → COMPLETED`, with `RESCHEDULE_REQUESTED` only while the date is not yet agreed |
-| E-mail | none | SMTP stored in DB, confirmation, reschedule and admin notifications |
+| E-mail | none | SMTP stored in DB, confirmation, invoice, settlement, reschedule and admin notifications |
 | Uploads | 10 MB, extension check only | 50/100 MB, magic-byte check, WebP thumbnail + preview, original admin-only |
 | First admin | hard-coded `admin` / `admin123` | env bootstrap, only while the table is empty, with Java's password rules |
 | JWT secret | hard-coded in `application.yml` | environment variable, at least 32 bytes |
@@ -86,11 +86,32 @@ terms-and-conditions.
   separate, explicit action so it can be retried. It carries a payment card:
   the 50% down payment worked out from the package price, the BCA account, and
   the static QRIS code at `/qris.png`.
-- Confirmation and reschedule e-mails are tracked
-  (`confirmation_email_sent_at`, `confirmation_email_count`) and written only
-  after SMTP accepts the message, so a failure leaves the row retryable.
+- Payment state is tracked on the booking: `UNPAID`, `DOWN_PAYMENT_PAID`
+  (`down_payment_paid_at`) or `PAID` (`down_payment_paid_at` +
+  `settlement_paid_at`). The state is derived on read, and marking a booking
+  `PAID` also records the down payment, so a booking can never be lunas without
+  a down-payment date.
+- Two further customer e-mails are manual, like the confirmation, and follow
+  the order of the booking:
+  - **Pelunasan** (settlement notice) — the remaining half, the BCA account, the
+    QRIS code and the steps to settle it, due the day before the session. It is
+    refused until the down payment is recorded (the message states the DP has
+    arrived) and for a booking already marked lunas.
+  - **Invoice** — the last message of a booking: the transaction as it was paid
+    (total, DP, pelunasan) plus the Google Drive link to the edited photos. It
+    is numbered `INV-<year>-<id padded to four digits>` (e.g. `INV-2026-0012`),
+    derived from the booking id and the current year, so it needs no counter
+    table. It is refused until the booking is `COMPLETED`, marked lunas and has
+    a `delivery_url`; it never asks for payment.
+- The Drive link is stored on the booking (`delivery_url`, `PATCH
+  /api/admin/bookings/{id}/delivery`) and validated as an http(s) URL, because
+  the invoice renders it as a button.
+- Confirmation, invoice, settlement and reschedule e-mails are tracked
+  (`confirmation_email_sent_at` / `_count`, `invoice_email_sent_at` / `_count`,
+  `settlement_email_sent_at` / `_count`) and written only after SMTP accepts the
+  message, so a failure leaves the row retryable.
 - Rescheduling stores the new date/time and sends a notification to the client.
-- Both customer e-mails end with a WhatsApp button pointing at the number in
+- The customer e-mails end with a WhatsApp button pointing at the number in
   the site's contact settings (the same one the floating button uses), so a
   reply goes to one chat instead of an inbox nobody watches.
 - New bookings notify the configured administrators, after the transaction
@@ -177,9 +198,11 @@ session.
 `booking_notification_recipients`.
 
 New since Lens & Light: `site_terms`, `smtp_settings`, the two notification
-tables, plus `booking` columns for terms acceptance and confirmation-email
-tracking. `galleries`, `services`, `testimonials`, `videos` and `faqs` no
-longer exist.
+tables, plus `booking` columns for terms acceptance, confirmation-email
+tracking, the two recorded payment points, the Drive link to the edited photos
+and the invoice / settlement delivery logs
+(`db/migrations/2026-11-16-booking-payment-tracking.sql`).
+`galleries`, `services`, `testimonials`, `videos` and `faqs` no longer exist.
 
 Schema changes are handwritten SQL in `db/migrations/`, applied by hand.
 The Go backend never creates or alters tables.

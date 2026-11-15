@@ -11,6 +11,7 @@ import {
 import { adminApi } from "../../services/adminApi";
 import CustomDatePicker from "../CustomDatePicker";
 import CustomTimePicker from "../CustomTimePicker";
+import BookingPayment from "./BookingPayment";
 import { formatDate } from "./adminFormat";
 import { pad } from "../../utils/bookingTime";
 import { adminLabel, adminInput, adminSecondaryButton } from "./adminStyles";
@@ -464,6 +465,19 @@ export default function BookingCalendar() {
                   <Mail size={15} /> Kirim Email Konfirmasi
                 </button>
               )}
+              <div className="border-t border-gray-200 pt-3">
+                <BookingPayment
+                  key={`payment-${selected.id}`}
+                  booking={selected}
+                  onUpdated={(update) => {
+                    if (!update) return;
+                    setSelected((current) => (current ? { ...current, ...update } : current));
+                    // The list drives the calendar cells, so the payment marker
+                    // there has to come from the server too.
+                    load();
+                  }}
+                />
+              </div>
               {!canReschedule && !canSendConfirmation && (
                 <p className="text-sm text-gray-600">
                   Pemesanan ini sudah selesai. Jadwal dan email konfirmasi tidak dapat diubah lagi.

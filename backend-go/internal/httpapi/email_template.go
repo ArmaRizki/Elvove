@@ -79,7 +79,7 @@ func renderBookingConfirmation(b bookingEmail, senderName, whatsapp, siteURL str
 			"Terima kasih telah memilih "+brand+". Kami telah menerima dan mengonfirmasi booking Anda. "+
 				"Berikut adalah detail reservasi Anda.") +
 		emailDetailsCard(b) +
-		emailPaymentBlock(b, siteURL) +
+		emailPaymentBlock(b) +
 		emailNextStepsBlock() +
 		emailWhatsAppButton(whatsapp, siteURL)
 
@@ -185,6 +185,220 @@ func renderAdminNotification(b bookingEmail, senderName, link, siteURL string) (
 	return subject, emailDocument(body, preview, siteURL), text.String()
 }
 
+// invoiceDetails is what the invoice adds to the booking itself: the number
+// that identifies the transaction, when it was issued, the payment points the
+// admin recorded, and the Drive folder holding the edited photos.
+type invoiceDetails struct {
+	Number      string // INV-2026-0012
+	IssuedAt    string // YYYY-MM-DD
+	DownPaidAt  string // YYYY-MM-DD; empty while no payment is recorded
+	SettledAt   string // YYYY-MM-DD; empty while the balance is open
+	DeliveryURL string // Google Drive folder with the edited photos
+}
+
+// paymentStateLabel is the one line the messages show about what has arrived.
+func (d invoiceDetails) paymentStateLabel() string {
+	switch {
+	case d.settled():
+		return "Lunas pada " + emailTanggal(d.SettledAt)
+	case d.downPaid():
+		return "DP dibayar pada " + emailTanggal(d.DownPaidAt)
+	default:
+		return "Belum ada pembayaran"
+	}
+}
+
+func (d invoiceDetails) settled() bool  { return strings.TrimSpace(d.SettledAt) != "" }
+func (d invoiceDetails) downPaid() bool { return strings.TrimSpace(d.DownPaidAt) != "" }
+
+// renderBookingInvoice is the last message of a booking: the transaction as it
+// was paid, and the link to the edited photos. The confirmation asks for the DP
+// and the settlement notice for the rest, so this one asks for nothing and only
+// closes the order.
+func renderBookingInvoice(b bookingEmail, invoice invoiceDetails, senderName, whatsapp, siteURL string) (string, string, string) {
+	siteURL = emailSiteURL(siteURL)
+	brand := emailBrandName(senderName)
+	customer := emailOneLine(b.Name)
+	issued := emailTanggal(invoice.IssuedAt)
+
+	body := emailBadge("INVOICE") +
+		emailHeadingBlock(
+			"Invoice & Hasil Foto",
+			"Nomor "+invoice.Number+" · diterbitkan "+issued+".") +
+		emailGreetingBlock(
+			"Halo, "+customer+".",
+			"Terima kasih telah memilih "+brand+". Berikut rincian transaksi pemesanan Anda, "+
+				"beserta tautan foto yang sudah diedit.") +
+		// The booking card leaves out the amounts: this message is a receipt,
+		// so the money sits in its own transaction panel below.
+		emailCardPanel("DETAIL BOOKING", []detailLine{
+			{Label: "Nama Pemesan", Value: emailOneLine(b.Name)},
+			{Label: "Tanggal Booking", Value: emailTanggal(b.EventDate)},
+			{Label: "Waktu Sesi", Value: emailJam(b.EventTime)},
+			{Label: "Lokasi", Value: emailOneLine(b.EventLocation)},
+			{Label: "Paket", Value: emailOneLine(b.PackageTitle)},
+		}) +
+		emailCardPanel("RINCIAN TRANSAKSI", []detailLine{
+			{Label: "Nomor Invoice", Value: invoice.Number},
+			{Label: "Tanggal Invoice", Value: issued},
+			{Label: "Total Harga", Value: emailRupiah(b.PackagePrice), Price: true},
+			{Label: "DP 50% Dibayar", Value: emailDownPayment(b.PackagePrice), Price: true},
+			{Label: "Pelunasan Dibayar", Value: emailRemainingBalance(b.PackagePrice), Price: true},
+			{Label: "Status", Value: invoice.paymentStateLabel()},
+		}) +
+		emailGalleryBlock(invoice.DeliveryURL) +
+		emailWhatsAppButton(whatsapp, siteURL)
+
+	var text strings.Builder
+	text.WriteString("INVOICE\n\n")
+	text.WriteString("Invoice & Hasil Foto\n\n")
+	text.WriteString("Nomor " + invoice.Number + " · diterbitkan " + issued + ".\n\n")
+	text.WriteString("Halo, " + customer + ".\n\n")
+	text.WriteString("Terima kasih telah memilih " + brand + ". Berikut rincian transaksi pemesanan Anda, ")
+	text.WriteString("beserta tautan foto yang sudah diedit.\n\n")
+	text.WriteString("DETAIL BOOKING\n")
+	text.WriteString("Nama Pemesan    : " + emailOneLine(b.Name) + "\n")
+	text.WriteString("Tanggal Booking : " + emailTanggal(b.EventDate) + "\n")
+	text.WriteString("Waktu Sesi      : " + emailJam(b.EventTime) + "\n")
+	text.WriteString("Lokasi          : " + emailOneLine(b.EventLocation) + "\n")
+	text.WriteString("Paket           : " + emailOneLine(b.PackageTitle) + "\n")
+	text.WriteString("\nRINCIAN TRANSAKSI\n")
+	text.WriteString("Nomor Invoice    : " + invoice.Number + "\n")
+	text.WriteString("Tanggal Invoice  : " + issued + "\n")
+	text.WriteString("Total Harga      : " + emailRupiah(b.PackagePrice) + "\n")
+	text.WriteString("DP 50% Dibayar   : " + emailDownPayment(b.PackagePrice) + "\n")
+	text.WriteString("Pelunasan Dibayar: " + emailRemainingBalance(b.PackagePrice) + "\n")
+	text.WriteString("Status           : " + invoice.paymentStateLabel() + "\n")
+	text.WriteString("\nFOTO SIAP DIUNDUH\n")
+	text.WriteString("Foto yang sudah diedit: " + invoice.DeliveryURL + "\n")
+	if url := emailWhatsAppURL(whatsapp); url != "" {
+		text.WriteString("\nWhatsApp: " + url + "\n")
+	}
+	text.WriteString("\nElvove\n")
+	text.WriteString(emailTagline + "\n")
+	text.WriteString("© " + strconv.Itoa(time.Now().Year()) + " " + brand + ". All rights reserved.\n")
+	text.WriteString(siteURL + "\n")
+
+	subject := "Invoice " + invoice.Number + " — " + brand
+	preview := emailPreview(b, "Invoice "+invoice.Number)
+	return subject, emailDocumentTitled(body, preview, siteURL, "Invoice "+invoice.Number+" — Elvove"), text.String()
+}
+
+// emailGalleryBlock is the delivery panel: a bordered card holding the Drive
+// link as one button, so the photos are one tap away on a phone.
+func emailGalleryBlock(link string) string {
+	href := emailEscape(link)
+	label := "BUKA GALERI FOTO"
+	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
+		"style=\"width:100%;border-collapse:collapse;\">" +
+		"<tr><td style=\"padding:26px 0 0 0;\">" +
+		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
+		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailCard + ";\">" +
+		"<tr><td align=\"center\" style=\"padding:18px 18px 0 18px;font-family:" + emailFont + ";font-size:11px;" +
+		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
+		"FOTO SIAP DIUNDUH" +
+		"</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:8px 18px 0 18px;font-family:" + emailFont + ";font-size:13px;" +
+		"line-height:20px;color:" + emailInk + ";\">" +
+		"Seluruh foto yang sudah diedit tersedia di Google Drive." +
+		"</td></tr>" +
+		"<tr><td align=\"center\" style=\"padding:16px 18px 20px 18px;\">" +
+		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">" +
+		"<tr><td align=\"center\" style=\"background:" + emailInk + ";border-radius:5px;\">" +
+		"<a href=\"" + href + "\" style=\"display:inline-block;padding:13px 24px;font-family:" + emailFont +
+		";font-size:12px;line-height:20px;font-weight:700;letter-spacing:1.2px;color:" + emailOnInk +
+		";text-decoration:none;\">" + label + "</a>" +
+		"</td></tr></table>" +
+		"</td></tr>" +
+		"</table>" +
+		"</td></tr></table>"
+}
+
+// renderBookingSettlement is the settlement notice: the remaining balance, the
+// account, the QRIS code and the deadline before the session. It deliberately
+// skips the package description the confirmation carries, so the one figure the
+// customer still owes is what stands out.
+func renderBookingSettlement(b bookingEmail, invoice invoiceDetails, senderName, whatsapp, siteURL string) (string, string, string) {
+	siteURL = emailSiteURL(siteURL)
+	brand := emailBrandName(senderName)
+	customer := emailOneLine(b.Name)
+	remaining := emailRemainingBalance(b.PackagePrice)
+	due := emailDueDate(b.EventDate)
+
+	body := emailBadge("PELUNASAN") +
+		emailHeadingBlock(
+			"Pelunasan Sisa Pembayaran",
+			"Sisa pembayaran sesi foto Anda pada "+emailTanggal(b.EventDate)+".") +
+		emailGreetingBlock(
+			"Halo, "+customer+".",
+			"Terima kasih telah memilih "+brand+". DP untuk sesi foto Anda sudah kami terima. "+
+				"Mohon lunasi sisa pembayaran sebesar "+remaining+" paling lambat "+due+".") +
+		emailCardPanel("RINCIAN PELUNASAN", []detailLine{
+			{Label: "Nomor Invoice", Value: invoice.Number},
+			{Label: "Tanggal Sesi", Value: emailTanggal(b.EventDate)},
+			{Label: "Waktu Sesi", Value: emailJam(b.EventTime)},
+			{Label: "Total Harga", Value: emailRupiah(b.PackagePrice), Price: true},
+			{Label: "DP Sudah Dibayar", Value: emailDownPayment(b.PackagePrice), Price: true},
+			{Label: "Sisa Pembayaran", Value: remaining, Price: true},
+		}) +
+		emailPaymentCard("SISA PEMBAYARAN", remaining) +
+		emailListBlock("CARA MELUNASI",
+			"Selesaikan pembayaran paling lambat "+due+".",
+			"Kirim bukti transfer via WhatsApp agar pemesanan Anda kami tandai lunas.") +
+		emailWhatsAppButton(whatsapp, siteURL)
+
+	var text strings.Builder
+	text.WriteString("PELUNASAN\n\n")
+	text.WriteString("Pelunasan Sisa Pembayaran\n\n")
+	text.WriteString("Sisa pembayaran sesi foto Anda pada " + emailTanggal(b.EventDate) + ".\n\n")
+	text.WriteString("Halo, " + customer + ".\n\n")
+	text.WriteString("Terima kasih telah memilih " + brand + ". DP untuk sesi foto Anda sudah kami terima. ")
+	text.WriteString("Mohon lunasi sisa pembayaran paling lambat " + due + ".\n\n")
+	text.WriteString("RINCIAN PELUNASAN\n")
+	text.WriteString("Nomor Invoice   : " + invoice.Number + "\n")
+	text.WriteString("Tanggal Sesi    : " + emailTanggal(b.EventDate) + "\n")
+	text.WriteString("Waktu Sesi      : " + emailJam(b.EventTime) + "\n")
+	text.WriteString("Total Harga     : " + emailRupiah(b.PackagePrice) + "\n")
+	text.WriteString("DP Sudah Dibayar: " + emailDownPayment(b.PackagePrice) + "\n")
+	text.WriteString("Sisa Pembayaran : " + remaining + "\n\n")
+	text.WriteString(emailPaymentInstructions("Sisa Pembayaran", remaining, siteURL))
+	text.WriteString("\nCARA MELUNASI\n")
+	text.WriteString("• Selesaikan pembayaran paling lambat " + due + ".\n")
+	text.WriteString("• Kirim bukti transfer via WhatsApp agar pemesanan Anda kami tandai lunas.\n")
+	if url := emailWhatsAppURL(whatsapp); url != "" {
+		text.WriteString("\nWhatsApp: " + url + "\n")
+	}
+	text.WriteString("\nElvove\n")
+	text.WriteString(emailTagline + "\n")
+	text.WriteString("© " + strconv.Itoa(time.Now().Year()) + " " + brand + ". All rights reserved.\n")
+	text.WriteString(siteURL + "\n")
+
+	subject := "Pelunasan Sisa Pembayaran — " + brand
+	preview := emailPreview(b, "Pelunasan Sisa Pembayaran")
+	return subject, emailDocumentTitled(body, preview, siteURL, "Pelunasan Sisa Pembayaran — Elvove"), text.String()
+}
+
+// emailInvoiceNumber derives the number from the booking itself, so the same
+// booking always gets the same number without a counter table:
+// INV-<year>-<id>, the id zero-padded to four digits.
+func emailInvoiceNumber(id int64, year int) string {
+	digits := strconv.FormatInt(id, 10)
+	for len(digits) < 4 {
+		digits = "0" + digits
+	}
+	return "INV-" + strconv.Itoa(year) + "-" + digits
+}
+
+// emailDueDate is the day before the session: the point by which the balance
+// should be settled.
+func emailDueDate(eventDate string) string {
+	date, err := time.Parse("2006-01-02", strings.TrimSpace(eventDate))
+	if err != nil {
+		return emailTanggal(eventDate)
+	}
+	return emailTanggal(date.AddDate(0, 0, -1).Format("2006-01-02"))
+}
+
 // emailSiteURL mirrors Java's constructor: a blank address falls back to the
 // production site so the logo and footer links never break.
 func emailSiteURL(siteURL string) string {
@@ -197,7 +411,15 @@ func emailSiteURL(siteURL string) string {
 
 // ---------------------------------------------------------------- layout
 
+// emailDocument wraps a rendered body in the shared shell. pageTitle is the
+// document title; emailDocumentTitled supplies the name this package used
+// before the invoice and the settlement notice existed, so the three older
+// messages keep their exact markup.
 func emailDocument(body, preheader, siteURL string) string {
+	return emailDocumentTitled(body, preheader, siteURL, "Konfirmasi Booking — Elvove")
+}
+
+func emailDocumentTitled(body, preheader, siteURL, pageTitle string) string {
 	return "<!DOCTYPE html PUBLIC \"-//W3C//DTD XHTML 1.0 Transitional//EN\" " +
 		"\"http://www.w3.org/TR/xhtml1/DTD/xhtml1-transitional.dtd\">" +
 		"<html xmlns=\"http://www.w3.org/1999/xhtml\" " +
@@ -211,7 +433,7 @@ func emailDocument(body, preheader, siteURL string) string {
 		"<meta name=\"supported-color-schemes\" content=\"light\">" +
 		"<link rel=\"preconnect\" href=\"https://fonts.googleapis.com\">" +
 		"<link href=\"" + emailFontImport + "\" rel=\"stylesheet\">" +
-		"<title>Konfirmasi Booking — Elvove</title>" +
+		"<title>" + emailEscape(pageTitle) + "</title>" +
 		"<!--[if mso]><noscript><xml><o:OfficeDocumentSettings>" +
 		"<o:PixelsPerInch>96</o:PixelsPerInch></o:OfficeDocumentSettings></xml></noscript><![endif]-->" +
 		"</head>" +
@@ -309,8 +531,37 @@ func emailGreetingBlock(greeting, paragraph string) string {
 		"</table>"
 }
 
+// detailLine is one row of a details card: a label, its value, and whether the
+// value is money (rendered heavier, since amounts are what a customer scans for).
+type detailLine struct {
+	Label string
+	Value string
+	Price bool
+}
+
 // The booking card: a bordered white panel holding a two-column table.
 func emailDetailsCard(b bookingEmail) string {
+	rows := []detailLine{
+		{Label: "Nama Pemesan", Value: emailOneLine(b.Name)},
+		{Label: "Tanggal Booking", Value: emailTanggal(b.EventDate)},
+		{Label: "Waktu Sesi", Value: emailJam(b.EventTime)},
+		{Label: "Lokasi", Value: emailOneLine(b.EventLocation)},
+		{Label: "Paket", Value: emailOneLine(b.PackageTitle)},
+		{Label: "Total Harga", Value: emailRupiah(b.PackagePrice), Price: true},
+		// The down payment is half the package price, so it is derived rather
+		// than stored; without a price both figures stay pending.
+		{Label: "DP 50% (Uang Muka)", Value: emailDownPayment(b.PackagePrice), Price: true},
+		{Label: "Sisa Pembayaran", Value: emailRemainingBalance(b.PackagePrice), Price: true},
+	}
+	return emailCardPanel("DETAIL BOOKING", rows)
+}
+
+// emailCardPanel renders a bordered panel with a title and label/value rows.
+func emailCardPanel(title string, rows []detailLine) string {
+	var body strings.Builder
+	for i, row := range rows {
+		body.WriteString(emailDetailRow(row.Label, row.Value, i == len(rows)-1, row.Price))
+	}
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:30px 0 0 0;\">" +
@@ -318,26 +569,23 @@ func emailDetailsCard(b bookingEmail) string {
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:18px 18px 4px 18px;font-family:" + emailFont + ";font-size:11px;" +
 		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
-		"DETAIL BOOKING" +
+		emailEscape(title) +
 		"</td></tr>" +
-		emailDetailRow("Nama Pemesan", emailOneLine(b.Name), false, false) +
-		emailDetailRow("Tanggal Booking", emailTanggal(b.EventDate), false, false) +
-		emailDetailRow("Waktu Sesi", emailJam(b.EventTime), false, false) +
-		emailDetailRow("Lokasi", emailOneLine(b.EventLocation), false, false) +
-		emailDetailRow("Paket", emailOneLine(b.PackageTitle), false, false) +
-		emailDetailRow("Total Harga", emailRupiah(b.PackagePrice), false, true) +
-		// The down payment is half the package price, so it is derived rather
-		// than stored; without a price both figures stay pending.
-		emailDetailRow("DP 50% (Uang Muka)", emailDownPayment(b.PackagePrice), false, true) +
-		emailDetailRow("Sisa Pembayaran", emailRemainingBalance(b.PackagePrice), true, true) +
+		body.String() +
 		"</table>" +
 		"</td></tr></table>"
 }
 
-// The payment card: what to pay now, the account to pay it into, and the
-// static QRIS code. Everything is centred, which keeps the short values —
-// an account number, a scan code — easy to read on a phone.
-func emailPaymentBlock(b bookingEmail, siteURL string) string {
+// The payment card of the confirmation: the down payment is due now.
+func emailPaymentBlock(b bookingEmail) string {
+	return emailPaymentCard("DP 50% DIBAYAR SEKARANG", emailDownPayment(b.PackagePrice))
+}
+
+// emailPaymentCard is the payment panel with its label and amount swapped: the
+// confirmation asks for the down payment, the settlement notice for the rest.
+// The account number and the QRIS code come from the same constants, so the
+// customer always sees one set of payment details.
+func emailPaymentCard(label, amount string) string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:18px 0 0 0;\">" +
@@ -356,9 +604,9 @@ func emailPaymentBlock(b bookingEmail, siteURL string) string {
 		"<tr><td align=\"center\" style=\"background:" + emailInfoBg + ";border:1px solid " + emailBorder +
 		";border-radius:8px;padding:14px 26px;font-family:" + emailFont + ";\">" +
 		"<div style=\"font-size:11px;line-height:16px;letter-spacing:1.2px;font-weight:700;" +
-		"color:" + emailInk + ";\">DP 50% DIBAYAR SEKARANG</div>" +
+		"color:" + emailInk + ";\">" + emailEscape(label) + "</div>" +
 		"<div style=\"padding:4px 0 0 0;font-size:24px;line-height:32px;font-weight:700;" +
-		"color:" + emailInk + ";\">" + emailDownPayment(b.PackagePrice) + "</div>" +
+		"color:" + emailInk + ";\">" + emailEscape(amount) + "</div>" +
 		"</td></tr></table>" +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:16px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
@@ -473,6 +721,19 @@ func emailDetailRow(label, value string, last, price bool) string {
 // The next-steps box: the same white bordered panel as the booking details,
 // with no accent bar, so the message stays monochrome.
 func emailNextStepsBlock() string {
+	return emailListBlock("LANGKAH SELANJUTNYA",
+		"Bayar DP 50% lewat transfer BCA atau QRIS.",
+		"Datang tepat waktu di lokasi yang disepakati.",
+		"Perlu ubah jadwal atau ada pertanyaan? Hubungi kami via WhatsApp.")
+}
+
+// emailListBlock is a bulleted panel with a title; the settlement notice uses
+// it for the payment steps, the confirmation for what happens next.
+func emailListBlock(title string, steps ...string) string {
+	var rows strings.Builder
+	for _, step := range steps {
+		rows.WriteString(emailStepRow(step))
+	}
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:26px 0 0 0;\">" +
@@ -484,11 +745,9 @@ func emailNextStepsBlock() string {
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:0 0 10px 0;font-family:" + emailFont + ";font-size:11px;" +
 		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
-		"LANGKAH SELANJUTNYA" +
+		emailEscape(title) +
 		"</td></tr>" +
-		emailStepRow("Bayar DP 50% lewat transfer BCA atau QRIS.") +
-		emailStepRow("Datang tepat waktu di lokasi yang disepakati.") +
-		emailStepRow("Perlu ubah jadwal atau ada pertanyaan? Hubungi kami via WhatsApp.") +
+		rows.String() +
 		"</table>" +
 		"</td>" +
 		"</tr>" +
@@ -618,6 +877,17 @@ func emailStepsText() string {
 func emailPaymentLines(price, siteURL string) string {
 	return "PEMBAYARAN\n" +
 		"DP 50%          : " + emailDownPayment(price) + " (dibayar sekarang)\n" +
+		"Transfer BCA    : " + emailBankAccount + "\n" +
+		"Atas Nama       : " + emailBankHolder + "\n" +
+		"QRIS            : " + emailQRISURL(siteURL) + "\n" +
+		"                  " + emailQRISMerchant + ", NMID " + emailQRISNMID + "\n"
+}
+
+// emailPaymentInstructions is the plain-text twin of emailPaymentCard: the same
+// account and QRIS details under a caller-chosen label and amount.
+func emailPaymentInstructions(label, amount, siteURL string) string {
+	return "PEMBAYARAN\n" +
+		label + " : " + amount + "\n" +
 		"Transfer BCA    : " + emailBankAccount + "\n" +
 		"Atas Nama       : " + emailBankHolder + "\n" +
 		"QRIS            : " + emailQRISURL(siteURL) + "\n" +

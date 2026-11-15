@@ -231,5 +231,95 @@ MAILED=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages")
 assert_json 'exactly one schedule e-mail reached the SMTP server' "$MAILED" \
   "d['total']==$MAIL_BEFORE+1 and 'Jadwal Sesi Foto Diperbarui' in d['messages'][0]['Subject']"
 
+log '9. Payment status and the invoice / settlement e-mails'
+# The invoice is the last message of a booking, so nothing can be billed yet.
+assert_json 'invoice refused before the booking is accepted' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/invoice-email")" \
+  "d['status']==400 and 'setelah pemesanan selesai' in d['message']"
+ACCEPTED_ONE=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"status":"ACCEPTED"}' "$BASE/api/admin/bookings/1/status")
+assert_json 'a fresh booking reports UNPAID with no payment dates' "$ACCEPTED_ONE" \
+  "d['status']=='ACCEPTED' and d['paymentStatus']=='UNPAID' and d['downPaymentPaidAt'] is None and d['settlementPaidAt'] is None"
+assert_json 'invoice refused while the booking is only accepted' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/invoice-email")" \
+  "d['status']==400 and 'setelah pemesanan selesai' in d['message']"
+assert_json 'settlement e-mail is refused before the DP is recorded' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/settlement-email")" \
+  "d['status']==400 and 'Tandai DP' in d['message']"
+DOWN_PAID=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"paymentStatus":"DOWN_PAYMENT_PAID"}' "$BASE/api/admin/bookings/1/payment")
+assert_json 'PATCH /payment records the down payment' "$DOWN_PAID" \
+  "d['paymentStatus']=='DOWN_PAYMENT_PAID' and d['downPaymentPaidAt'] is not None and d['settlementPaidAt'] is None"
+
+SETTLE_BEFORE=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
+SETTLEMENT=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/admin/bookings/1/settlement-email")
+assert_json 'settlement e-mail answers and is tracked' "$SETTLEMENT" \
+  "d['settlementEmailCount']==1 and d['sentTo']=='klien1@example.test' and 'Email pelunasan berhasil dikirim' in d['message']"
+SETTLE_MAILED=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages")
+assert_json 'the settlement notice reached the SMTP server' "$SETTLE_MAILED" \
+  "d['total']==$SETTLE_BEFORE+1 and d['messages'][0]['Subject']=='Pelunasan Sisa Pembayaran — Elvove'"
+
+COMPLETED_ONE=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"status":"COMPLETED"}' "$BASE/api/admin/bookings/1/status")
+assert_json 'the booking moves on to COMPLETED' "$COMPLETED_ONE" \
+  "d['status']=='COMPLETED'"
+# A finished booking with an open balance is not a closed order yet.
+assert_json 'invoice refused while the balance is open' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/invoice-email")" \
+  "d['status']==400 and 'lunas' in d['message']"
+
+PAID_BODY=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+  -d '{"paymentStatus":"PAID"}' "$BASE/api/admin/bookings/1/payment")
+assert_json 'marking lunas records both payment points' "$PAID_BODY" \
+  "d['paymentStatus']=='PAID' and d['downPaymentPaidAt'] is not None and d['settlementPaidAt'] is not None"
+assert_json 'a settled booking refuses a settlement e-mail' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/settlement-email")" \
+  "d['status']==400 and 'sudah ditandai lunas' in d['message']"
+
+# The invoice carries the gallery link, so it is refused until one is saved.
+assert_json 'invoice refused without a delivery link' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/invoice-email")" \
+  "d['status']==400 and 'Google Drive' in d['message']"
+assert_json 'PATCH /delivery rejects a link that is not http(s)' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"deliveryUrl":"javascript:alert(1)"}' "$BASE/api/admin/bookings/1/delivery")" \
+  "d['error']=='Validation Failed' and 'deliveryUrl' in (d['fieldErrors'] or {})"
+assert_json 'PATCH /delivery stores the Drive folder' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"deliveryUrl":"https://drive.google.com/drive/folders/verify"}' "$BASE/api/admin/bookings/1/delivery")" \
+  "d['deliveryUrl']=='https://drive.google.com/drive/folders/verify'"
+
+INVOICE=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/admin/bookings/1/invoice-email")
+assert_json 'invoice answers and is tracked' "$INVOICE" \
+  "d['invoiceEmailCount']==1 and d['sentTo']=='klien1@example.test' and 'Email invoice berhasil dikirim' in d['message']"
+# The number is derived from the booking id and the year, so it is stable.
+INVOICE_MAILED=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages")
+assert_json 'the invoice carries the derived number in its subject' "$INVOICE_MAILED" \
+  "d['messages'][0]['Subject'].startswith('Invoice INV-') and d['messages'][0]['Subject'].endswith('-0001 — Elvove')"
+INVOICE_ID=$(printf '%s' "$INVOICE_MAILED" | python3 -c 'import sys,json;print(json.load(sys.stdin)["messages"][0]["ID"])')
+assert_json 'the invoice carries the Drive link' \
+  "$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/message/$INVOICE_ID")" \
+  "'https://drive.google.com/drive/folders/verify' in (d.get('Text') or '')"
+assert_json 'unknown payment status is an unreadable body' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"paymentStatus":"HALF"}' "$BASE/api/admin/bookings/1/payment")" \
+  "d['status']==400 and d['message']=='Format permintaan tidak valid. Periksa kembali data yang dikirim.'"
+assert_json 'missing payment status gives fieldErrors' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{}' "$BASE/api/admin/bookings/1/payment")" \
+  "d['error']=='Validation Failed' and 'paymentStatus' in (d['fieldErrors'] or {})"
+assert_json 'invoice for a missing booking answers 404' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" "$BASE/api/admin/bookings/999/invoice-email")" \
+  "d['status']==404 and d['message']=='Pemesanan tidak ditemukan.'"
+
 printf '\n\033[1mResult: %d passed, %d failed\033[0m\n' "$PASS" "$FAIL"
 [[ $FAIL -eq 0 ]]

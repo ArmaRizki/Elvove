@@ -43,6 +43,12 @@ export const adminApi = {
   updateBookingStatus: (id, status) => api.patch(`/api/admin/bookings/${id}/status`, { status }),
   acceptBooking: (id) => api.post(`/api/admin/bookings/${id}/accept`),
   sendBookingConfirmation: (id) => api.post(`/api/admin/bookings/${id}/confirmation-email`),
+  sendBookingInvoice: (id) => api.post(`/api/admin/bookings/${id}/invoice-email`),
+  sendBookingSettlement: (id) => api.post(`/api/admin/bookings/${id}/settlement-email`),
+  updateBookingPayment: (id, paymentStatus) =>
+    api.patch(`/api/admin/bookings/${id}/payment`, { paymentStatus }),
+  updateBookingDelivery: (id, deliveryUrl) =>
+    api.patch(`/api/admin/bookings/${id}/delivery`, { deliveryUrl }),
   rescheduleBooking: (id, data) => api.patch(`/api/admin/bookings/${id}/reschedule`, data),
   deleteBooking: (id) => api.delete(`/api/admin/bookings/${id}`),
 

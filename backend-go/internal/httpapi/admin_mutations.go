@@ -813,32 +813,76 @@ func formatMailFrom(name, address string) string {
 	return from.String()
 }
 
-func (s *Server) sendBookingConfirmation(w http.ResponseWriter, r *http.Request) {
-	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
-	if e != nil || id < 1 {
-		writeError(w, 400, "Invalid resource id.")
+// customerMail describes one manually sent customer e-mail: how the panel names
+// it, which booking columns record a delivery, which JSON keys report it, and
+// when the booking is allowed to receive it. Every column and key here is a
+// code constant, never request input.
+type customerMail struct {
+	Label       string // "konfirmasi", "invoice", "pelunasan"
+	NoEmail     string // full sentence when the booking has no client address
+	SentColumn  string
+	CountColumn string
+	SentKey     string
+	CountKey    string
+	Refuse      func(mailBooking) string // "" when the booking may receive it
+	Render      func(mailBooking, string, string, string) (string, string, string)
+}
+
+// mailBooking is one booking loaded for a customer e-mail: the template values
+// plus the status and payment columns the guards read.
+type mailBooking struct {
+	bookingEmail
+	Status      string
+	DownPaidAt  string // YYYY-MM-DD; empty when no payment is recorded
+	SettledAt   string // YYYY-MM-DD; empty when the balance is still open
+	DeliveryURL string // Google Drive folder with the edited photos
+}
+
+// invoiceDetails turns the recorded payment dates and the delivery link into
+// what the invoice and the settlement notice print.
+func (b mailBooking) invoiceDetails(now time.Time) invoiceDetails {
+	number := emailInvoiceNumber(b.ID, now.Year())
+	return invoiceDetails{
+		Number:      number,
+		IssuedAt:    now.Format("2006-01-02"),
+		DownPaidAt:  b.DownPaidAt,
+		SettledAt:   b.SettledAt,
+		DeliveryURL: b.DeliveryURL,
+	}
+}
+
+// loadMailBooking reads one booking for an e-mail endpoint. A missing row comes
+// back as pgx.ErrNoRows so each handler keeps its own not-found wording.
+func (s *Server) loadMailBooking(ctx context.Context, id int64) (mailBooking, error) {
+	var b mailBooking
+	err := s.Store.Pool.QueryRow(ctx, `SELECT id,name,COALESCE(email,''),COALESCE(phone,''),COALESCE(to_char(event_date,'YYYY-MM-DD'),''),COALESCE(to_char(event_time,'HH24:MI'),''),COALESCE(package_title,''),COALESCE(package_price::text,''),COALESCE(event_location,''),status,COALESCE(to_char(down_payment_paid_at,'YYYY-MM-DD'),''),COALESCE(to_char(settlement_paid_at,'YYYY-MM-DD'),''),COALESCE(delivery_url,'') FROM bookings WHERE id=$1`, id).
+		Scan(&b.ID, &b.Name, &b.Email, &b.Phone, &b.EventDate, &b.EventTime, &b.PackageTitle, &b.PackagePrice, &b.EventLocation, &b.Status, &b.DownPaidAt, &b.SettledAt, &b.DeliveryURL)
+	return b, err
+}
+
+// sendCustomerMail is the shared body of the manual customer e-mail endpoints:
+// guard against a double click, load, refuse when the booking is not eligible,
+// render, send, and record the delivery. A failed send leaves the tracking
+// columns untouched so the admin can simply retry.
+func (s *Server) sendCustomerMail(w http.ResponseWriter, r *http.Request, mail customerMail) {
+	id, ok := bookingIDFromPath(w, r)
+	if !ok {
 		return
 	}
-	s.confirmationMu.Lock()
-	if s.confirming[id] {
-		s.confirmationMu.Unlock()
-		writeError(w, 400, "Email konfirmasi untuk pemesanan ini sedang dikirim. Tunggu hingga proses selesai.")
+	s.mailMu.Lock()
+	if s.mailing[id] {
+		s.mailMu.Unlock()
+		writeError(w, 400, "Email "+mail.Label+" untuk pemesanan ini sedang dikirim. Tunggu hingga proses selesai.")
 		return
 	}
-	s.confirming[id] = true
-	s.confirmationMu.Unlock()
-	defer func() { s.confirmationMu.Lock(); delete(s.confirming, id); s.confirmationMu.Unlock() }()
-	var booking struct {
-		Email         string
-		Name          string
-		EventDate     string
-		EventTime     string
-		PackageTitle  string
-		PackagePrice  string
-		EventLocation *string
-	}
-	var status string
-	err := s.Store.Pool.QueryRow(r.Context(), `SELECT email,name,COALESCE(to_char(event_date,'YYYY-MM-DD'),''),COALESCE(to_char(event_time,'HH24:MI'),''),COALESCE(package_title,''),COALESCE(package_price::text,''),COALESCE(event_location,''),status FROM bookings WHERE id=$1`, id).Scan(&booking.Email, &booking.Name, &booking.EventDate, &booking.EventTime, &booking.PackageTitle, &booking.PackagePrice, &booking.EventLocation, &status)
+	s.mailing[id] = true
+	s.mailMu.Unlock()
+	defer func() {
+		s.mailMu.Lock()
+		delete(s.mailing, id)
+		s.mailMu.Unlock()
+	}()
+	b, err := s.loadMailBooking(r.Context(), id)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Java's workflow controller uses ResourceNotFoundException with a plain
 		// message for this endpoint rather than the generated one.
@@ -849,33 +893,215 @@ func (s *Server) sendBookingConfirmation(w http.ResponseWriter, r *http.Request)
 		writeError(w, 500, "Booking could not be loaded.")
 		return
 	}
-	if status != "ACCEPTED" {
-		writeError(w, 400, "Email konfirmasi hanya dapat dikirim untuk pemesanan yang sudah diterima.")
+	if refusal := mail.Refuse(b); refusal != "" {
+		writeError(w, 400, refusal)
 		return
 	}
-	if strings.TrimSpace(booking.Email) == "" {
-		writeError(w, 400, "Pemesanan ini tidak memiliki alamat email klien, sehingga konfirmasi tidak dapat dikirim.")
+	if strings.TrimSpace(b.Email) == "" {
+		writeError(w, 400, mail.NoEmail)
 		return
 	}
-	subject, htmlBody, textBody := renderBookingConfirmation(bookingEmail{
-		Name:          booking.Name,
-		EventDate:     booking.EventDate,
-		EventTime:     booking.EventTime,
-		EventLocation: deref(booking.EventLocation),
-		PackageTitle:  booking.PackageTitle,
-		PackagePrice:  booking.PackagePrice,
-	}, s.mailSenderName(r), s.contactWhatsApp(r), s.Config.SiteURL)
-	if e = s.sendSMTPMessage(r, booking.Email, subject, htmlBody, textBody); e != nil {
-		writeError(w, 400, "Email konfirmasi gagal dikirim. Periksa konfigurasi pada Pengaturan Email, lalu coba lagi.")
+	subject, htmlBody, textBody := mail.Render(b, s.mailSenderName(r), s.contactWhatsApp(r), s.Config.SiteURL)
+	if err = s.sendSMTPMessage(r, b.Email, subject, htmlBody, textBody); err != nil {
+		writeError(w, 400, "Email "+mail.Label+" gagal dikirim. Periksa konfigurasi pada Pengaturan Email, lalu coba lagi.")
 		return
 	}
 	var sentAt time.Time
 	var count int
-	if err = s.Store.Pool.QueryRow(r.Context(), `UPDATE bookings SET confirmation_email_sent_at=NOW(),confirmation_email_count=COALESCE(confirmation_email_count,0)+1 WHERE id=$1 RETURNING confirmation_email_sent_at,confirmation_email_count`, id).Scan(&sentAt, &count); err != nil {
-		writeError(w, 400, "Email konfirmasi terkirim, tetapi status pengiriman gagal disimpan. Silakan periksa data pemesanan.")
+	// The column names are the constants in mail, so this is not string-built SQL
+	// from user input.
+	record := `UPDATE bookings SET ` + mail.SentColumn + `=NOW(),` + mail.CountColumn +
+		`=COALESCE(` + mail.CountColumn + `,0)+1 WHERE id=$1 RETURNING ` + mail.SentColumn + `,` + mail.CountColumn
+	if err = s.Store.Pool.QueryRow(r.Context(), record, id).Scan(&sentAt, &count); err != nil {
+		writeError(w, 400, "Email "+mail.Label+" terkirim, tetapi status pengiriman gagal disimpan. Silakan periksa data pemesanan.")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"message": "Email konfirmasi berhasil dikirim ke " + booking.Email + ".", "sentTo": booking.Email, "confirmationEmailSentAt": wibTimestamp(sentAt), "confirmationEmailCount": count})
+	writeJSON(w, 200, map[string]any{
+		"message":     "Email " + mail.Label + " berhasil dikirim ke " + b.Email + ".",
+		"sentTo":      b.Email,
+		mail.SentKey:  wibTimestamp(sentAt),
+		mail.CountKey: count,
+	})
+}
+
+// bookingIDFromPath reads and validates the {id} path value shared by the
+// booking mutation endpoints.
+func bookingIDFromPath(w http.ResponseWriter, r *http.Request) (int64, bool) {
+	id, err := strconv.ParseInt(r.PathValue("id"), 10, 64)
+	if err != nil || id < 1 {
+		writeError(w, 400, "Invalid resource id.")
+		return 0, false
+	}
+	return id, true
+}
+
+func (s *Server) sendBookingConfirmation(w http.ResponseWriter, r *http.Request) {
+	s.sendCustomerMail(w, r, customerMail{
+		Label:       "konfirmasi",
+		NoEmail:     "Pemesanan ini tidak memiliki alamat email klien, sehingga konfirmasi tidak dapat dikirim.",
+		SentColumn:  "confirmation_email_sent_at",
+		CountColumn: "confirmation_email_count",
+		SentKey:     "confirmationEmailSentAt",
+		CountKey:    "confirmationEmailCount",
+		Refuse: func(b mailBooking) string {
+			if b.Status != "ACCEPTED" {
+				return "Email konfirmasi hanya dapat dikirim untuk pemesanan yang sudah diterima."
+			}
+			return ""
+		},
+		Render: func(b mailBooking, sender, whatsapp, siteURL string) (string, string, string) {
+			return renderBookingConfirmation(b.bookingEmail, sender, whatsapp, siteURL)
+		},
+	})
+}
+
+// sendBookingInvoice closes the order: the transaction as paid, plus the link to
+// the edited photos. It is refused until the booking is finished and paid and
+// the Drive folder is filled in, because a final invoice with no gallery or with
+// an open balance would be wrong.
+func (s *Server) sendBookingInvoice(w http.ResponseWriter, r *http.Request) {
+	s.sendCustomerMail(w, r, customerMail{
+		Label:       "invoice",
+		NoEmail:     "Pemesanan ini tidak memiliki alamat email klien, sehingga invoice tidak dapat dikirim.",
+		SentColumn:  "invoice_email_sent_at",
+		CountColumn: "invoice_email_count",
+		SentKey:     "invoiceEmailSentAt",
+		CountKey:    "invoiceEmailCount",
+		Refuse: func(b mailBooking) string {
+			if b.Status != "COMPLETED" {
+				return "Invoice hanya dapat dikirim setelah pemesanan selesai."
+			}
+			if b.SettledAt == "" {
+				return "Tandai pembayaran sebagai lunas terlebih dahulu, lalu kirim invoice."
+			}
+			if strings.TrimSpace(b.DeliveryURL) == "" {
+				return "Isi link Google Drive foto edit terlebih dahulu, lalu kirim invoice."
+			}
+			return ""
+		},
+		Render: func(b mailBooking, sender, whatsapp, siteURL string) (string, string, string) {
+			return renderBookingInvoice(b.bookingEmail, b.invoiceDetails(nowWallClock()), sender, whatsapp, siteURL)
+		},
+	})
+}
+
+// sendBookingSettlement sends the reminder for the remaining half. A booking
+// marked lunas has nothing left to settle, so it is refused rather than sent a
+// message asking for money that already arrived.
+func (s *Server) sendBookingSettlement(w http.ResponseWriter, r *http.Request) {
+	s.sendCustomerMail(w, r, customerMail{
+		Label:       "pelunasan",
+		NoEmail:     "Pemesanan ini tidak memiliki alamat email klien, sehingga email pelunasan tidak dapat dikirim.",
+		SentColumn:  "settlement_email_sent_at",
+		CountColumn: "settlement_email_count",
+		SentKey:     "settlementEmailSentAt",
+		CountKey:    "settlementEmailCount",
+		Refuse: func(b mailBooking) string {
+			if b.Status != "ACCEPTED" && b.Status != "COMPLETED" {
+				return "Email pelunasan hanya dapat dikirim untuk pemesanan yang sudah diterima."
+			}
+			if b.SettledAt != "" {
+				return "Pemesanan ini sudah ditandai lunas, sehingga tidak ada sisa pembayaran yang perlu ditagih."
+			}
+			// The notice states the down payment has arrived. Sending it before
+			// that is recorded would tell the customer something untrue, so the
+			// admin marks the DP first.
+			if b.DownPaidAt == "" {
+				return "Tandai DP sebagai dibayar terlebih dahulu, lalu kirim email pelunasan."
+			}
+			return ""
+		},
+		Render: func(b mailBooking, sender, whatsapp, siteURL string) (string, string, string) {
+			return renderBookingSettlement(b.bookingEmail, b.invoiceDetails(nowWallClock()), sender, whatsapp, siteURL)
+		},
+	})
+}
+
+// updateBookingPayment records where the payment stands: nothing, the down
+// payment, or the whole amount. The request carries the state and the two
+// timestamps follow from it, so a booking can never claim "lunas" without a
+// down-payment date.
+func (s *Server) updateBookingPayment(w http.ResponseWriter, r *http.Request) {
+	id, ok := bookingIDFromPath(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		PaymentStatus string `json:"paymentStatus"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.PaymentStatus == "" {
+		writeValidationError(w, map[string]string{"paymentStatus": "Status pembayaran wajib diisi."})
+		return
+	}
+	var update string
+	switch req.PaymentStatus {
+	case "UNPAID":
+		update = `UPDATE bookings SET down_payment_paid_at=NULL,settlement_paid_at=NULL,updated_at=NOW() WHERE id=$1`
+	case "DOWN_PAYMENT_PAID":
+		// The DP time is kept on a resend of the same state, so the recorded
+		// moment stays the one the admin first confirmed.
+		update = `UPDATE bookings SET down_payment_paid_at=COALESCE(down_payment_paid_at,NOW()),settlement_paid_at=NULL,updated_at=NOW() WHERE id=$1`
+	case "PAID":
+		update = `UPDATE bookings SET down_payment_paid_at=COALESCE(down_payment_paid_at,NOW()),settlement_paid_at=COALESCE(settlement_paid_at,NOW()),updated_at=NOW() WHERE id=$1`
+	default:
+		// An unknown value is a body the Java DTO would refuse to parse, the same
+		// split PATCH /status makes for an unknown status.
+		writeUnreadableBody(w)
+		return
+	}
+	if _, err := s.Store.Exec(r.Context(), update, id); err != nil {
+		writeError(w, 500, "Booking could not be updated.")
+		return
+	}
+	booking, err := s.fetchBooking(r, id)
+	if err != nil {
+		writeError(w, 404, "Pemesanan tidak ditemukan.")
+		return
+	}
+	writeJSON(w, 200, booking)
+}
+
+// updateBookingDelivery stores the Google Drive folder holding the edited
+// photos. The invoice e-mail carries it, so the admin pastes it once here
+// instead of writing it into every message by hand. An empty value clears it.
+func (s *Server) updateBookingDelivery(w http.ResponseWriter, r *http.Request) {
+	id, ok := bookingIDFromPath(w, r)
+	if !ok {
+		return
+	}
+	var req struct {
+		DeliveryURL *string `json:"deliveryUrl"`
+	}
+	if !decodeJSON(w, r, &req) {
+		return
+	}
+	if req.DeliveryURL == nil {
+		writeValidationError(w, map[string]string{"deliveryUrl": "Link foto wajib diisi."})
+		return
+	}
+	link := strings.TrimSpace(*req.DeliveryURL)
+	if link != "" {
+		parsed, err := url.Parse(link)
+		// A mail button needs http(s); anything else (javascript:, a bare
+		// string) would render as a dead or unsafe link in the message.
+		if err != nil || (parsed.Scheme != "http" && parsed.Scheme != "https") || parsed.Host == "" {
+			writeValidationError(w, map[string]string{"deliveryUrl": "Link foto harus berupa URL http(s) yang valid."})
+			return
+		}
+	}
+	if _, err := s.Store.Exec(r.Context(), `UPDATE bookings SET delivery_url=NULLIF($2,''),updated_at=NOW() WHERE id=$1`, id, link); err != nil {
+		writeError(w, 500, "Booking could not be updated.")
+		return
+	}
+	booking, err := s.fetchBooking(r, id)
+	if err != nil {
+		writeError(w, 404, "Pemesanan tidak ditemukan.")
+		return
+	}
+	writeJSON(w, 200, booking)
 }
 
 // mailSenderName reads the configured sender name used in the e-mail

@@ -25,12 +25,14 @@ import (
 )
 
 type Server struct {
-	Config         config.Config
-	Store          *store.Store
-	Auth           *Auth
-	Limiter        *RateLimiter
-	confirmationMu sync.Mutex
-	confirming     map[int64]bool
+	Config  config.Config
+	Store   *store.Store
+	Auth    *Auth
+	Limiter *RateLimiter
+	// mailMu guards mailing, so two clicks cannot send the same customer
+	// e-mail twice for one booking.
+	mailMu  sync.Mutex
+	mailing map[int64]bool
 }
 
 type decimalValue string
@@ -47,7 +49,7 @@ func (d decimalValue) MarshalJSON() ([]byte, error) {
 
 func NewServer(cfg config.Config, db *store.Store) *Server {
 	limiter := NewRateLimiter()
-	s := &Server{Config: cfg, Store: db, Limiter: limiter, confirming: make(map[int64]bool)}
+	s := &Server{Config: cfg, Store: db, Limiter: limiter, mailing: make(map[int64]bool)}
 	s.Auth = &Auth{Store: db, Secret: cfg.JWTSecret, Limiter: limiter, MaxAge: 24 * time.Hour}
 	return s
 }
@@ -104,6 +106,10 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/status", s.updateBookingStatus)
 	admin.HandleFunc("POST /api/admin/bookings/{id}/accept", s.acceptBooking)
 	admin.HandleFunc("POST /api/admin/bookings/{id}/confirmation-email", s.sendBookingConfirmation)
+	admin.HandleFunc("POST /api/admin/bookings/{id}/invoice-email", s.sendBookingInvoice)
+	admin.HandleFunc("POST /api/admin/bookings/{id}/settlement-email", s.sendBookingSettlement)
+	admin.HandleFunc("PATCH /api/admin/bookings/{id}/payment", s.updateBookingPayment)
+	admin.HandleFunc("PATCH /api/admin/bookings/{id}/delivery", s.updateBookingDelivery)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/reschedule", s.rescheduleBooking)
 	admin.HandleFunc("DELETE /api/admin/bookings/{id}", s.deleteBooking)
 	admin.HandleFunc("POST /api/admin/upload", s.upload)
@@ -390,7 +396,7 @@ func (s *Server) dashboardSummary(w http.ResponseWriter, r *http.Request) {
 // paths format price and time the same way (Java returns one BookingResponse).
 // Spring Boot disables WRITE_DATES_AS_TIMESTAMPS, so Jackson writes LocalTime as
 // the ISO string "09:30:00", which is exactly what the admin UI parses.
-const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount" FROM bookings`
+const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount", down_payment_paid_at AS "downPaymentPaidAt", settlement_paid_at AS "settlementPaidAt", invoice_email_sent_at AS "invoiceEmailSentAt", COALESCE(invoice_email_count, 0) AS "invoiceEmailCount", settlement_email_sent_at AS "settlementEmailSentAt", COALESCE(settlement_email_count, 0) AS "settlementEmailCount", COALESCE(delivery_url, '') AS "deliveryUrl", CASE WHEN settlement_paid_at IS NOT NULL THEN 'PAID' WHEN down_payment_paid_at IS NOT NULL THEN 'DOWN_PAYMENT_PAID' ELSE 'UNPAID' END AS "paymentStatus" FROM bookings`
 
 func normalizeBooking(booking map[string]any) {
 	if price, ok := booking["packagePrice"].(string); ok && decimalPattern.MatchString(price) {

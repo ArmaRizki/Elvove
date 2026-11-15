@@ -1,4 +1,12 @@
-import { formatDate, formatDateTime, formatTime, statusBadge, statusLabel } from "./adminFormat";
+import {
+  formatDate,
+  formatDateTime,
+  formatTime,
+  paymentBadge,
+  paymentLabel,
+  statusBadge,
+  statusLabel,
+} from "./adminFormat";
 import { formatPrice } from "../../utils/format";
 
 function Field({ label, value, breakAll = false, children }) {
@@ -31,6 +39,8 @@ export default function BookingDetails({ booking }) {
 
   const packageName = booking.packageTitle || "Belum tercatat";
   const packagePrice = formatPrice(booking.packagePrice);
+  const downPaidAt = formatDate(booking.downPaymentPaidAt);
+  const settledAt = formatDate(booking.settlementPaidAt);
   const scheduleDate = formatDate(booking.eventDate);
   const scheduleTime = formatTime(booking.eventTime);
   const createdAt = formatDateTime(booking.createdAt);
@@ -42,6 +52,25 @@ export default function BookingDetails({ booking }) {
       ? sentAt
         ? `Terkirim ${sentCount} kali, terakhir ${sentAt}`
         : `Terkirim ${sentCount} kali`
+      : "Belum dikirim";
+  // Invoice and settlement are separate manual steps, so each keeps its own
+  // line; a delivery count without a date only happens if the send stamped one
+  // and not the other.
+  const invoiceCount = Number(booking.invoiceEmailCount) || 0;
+  const invoiceSentAt = formatDateTime(booking.invoiceEmailSentAt);
+  const invoiceStatus =
+    invoiceCount > 0
+      ? invoiceSentAt
+        ? `Terkirim ${invoiceCount} kali, terakhir ${invoiceSentAt}`
+        : `Terkirim ${invoiceCount} kali`
+      : "Belum dikirim";
+  const settlementCount = Number(booking.settlementEmailCount) || 0;
+  const settlementSentAt = formatDateTime(booking.settlementEmailSentAt);
+  const settlementStatus =
+    settlementCount > 0
+      ? settlementSentAt
+        ? `Terkirim ${settlementCount} kali, terakhir ${settlementSentAt}`
+        : `Terkirim ${settlementCount} kali`
       : "Belum dikirim";
 
   return (
@@ -91,8 +120,25 @@ export default function BookingDetails({ booking }) {
               </span>
             </dd>
           </div>
+          <div className="min-w-0">
+            <dt className="text-[10px] tracking-widest text-gray-500">STATUS PEMBAYARAN</dt>
+            <dd className="mt-1">
+              <span
+                className={`inline-flex border px-2 py-1 text-xs ${paymentBadge(booking.paymentStatus)}`}
+              >
+                {paymentLabel(booking.paymentStatus)}
+              </span>
+            </dd>
+          </div>
+          {downPaidAt && <Field label="DP dibayar pada" value={downPaidAt} />}
+          {settledAt && <Field label="Lunas pada" value={settledAt} />}
+          {booking.deliveryUrl && (
+            <Field label="Link foto edit" breakAll value={booking.deliveryUrl} />
+          )}
           <Field label="Dibuat pada" value={createdAt || "Belum tercatat"} />
           <Field label="Email konfirmasi" value={emailStatus} />
+          <Field label="Email pelunasan" value={settlementStatus} />
+          <Field label="Email invoice" value={invoiceStatus} />
           {updatedAt && updatedAt !== createdAt ? (
             <Field label="Terakhir diperbarui" value={updatedAt} />
           ) : null}

@@ -7,6 +7,7 @@ import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import BookingDetails from "../../components/admin/BookingDetails";
 import BookingConfirmationEmail from "../../components/admin/BookingConfirmationEmail";
+import BookingPayment from "../../components/admin/BookingPayment";
 import {
   adminLabel,
   adminTableWide,
@@ -16,6 +17,8 @@ import {
   STATUS_OPTIONS,
   formatDate,
   formatTime,
+  paymentBadge,
+  paymentLabel,
   statusBadge,
   statusLabel,
 } from "../../components/admin/adminFormat";
@@ -141,6 +144,17 @@ export default function Bookings() {
     }
   };
 
+  // Applies a booking patch (payment change or e-mail tracking) to the open
+  // dialog and to the list behind it, so the two never disagree.
+  const applyBookingUpdate = (update) => {
+    if (!update) return;
+    const patch = { id: selected?.id, ...update };
+    setSelected((current) => (current ? { ...current, ...patch } : current));
+    setBookings((current) =>
+      current.map((item) => (item.id === patch.id ? { ...item, ...patch } : item))
+    );
+  };
+
   const handleDelete = async (booking) => {
     if (
       !window.confirm(
@@ -224,7 +238,20 @@ export default function Bookings() {
                     </td>
 
                     <td className="px-4 py-3">
-                      <StatusBadge status={b.status} />
+                      <div className="space-y-1">
+                        <StatusBadge status={b.status} />
+                        {/* Only the recorded payments get a badge; "Belum bayar"
+                            on every row would be noise. */}
+                        {b.paymentStatus && b.paymentStatus !== "UNPAID" && (
+                          <div>
+                            <span
+                              className={`inline-flex whitespace-nowrap border px-2 py-1 text-xs ${paymentBadge(b.paymentStatus)}`}
+                            >
+                              {paymentLabel(b.paymentStatus)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
                     </td>
 
                     <td className="px-4 py-3 text-right whitespace-nowrap">
@@ -292,7 +319,14 @@ export default function Bookings() {
                 </dl>
 
                 <div className="mt-3 flex items-center justify-between gap-3">
-                  <StatusBadge status={b.status} />
+                  <div className="flex flex-wrap items-center gap-2">
+                    <StatusBadge status={b.status} />
+                    {b.paymentStatus && b.paymentStatus !== "UNPAID" && (
+                      <span className={`inline-flex border px-2 py-1 text-xs ${paymentBadge(b.paymentStatus)}`}>
+                        {paymentLabel(b.paymentStatus)}
+                      </span>
+                    )}
+                  </div>
                   <button
                     type="button"
                     onClick={() => openDetail(b)}
@@ -400,7 +434,13 @@ export default function Bookings() {
                 }}
               />
 
-              {selected.status !== "ACCEPTED" && (
+              <BookingPayment
+                key={`payment-${selected.id}`}
+                booking={selected}
+                onUpdated={applyBookingUpdate}
+              />
+
+              {selected.status !== "ACCEPTED" && selected.status !== "COMPLETED" && (
                 <p className="text-xs text-gray-500">
                   Tombol kirim email konfirmasi tersedia setelah status pemesanan diubah menjadi
                   Diterima.

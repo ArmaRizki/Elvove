@@ -136,6 +136,14 @@ func TestEmailsKeepOnlyTheWordmarkAndWhatsAppInColour(t *testing.T) {
 			_, h, _ := renderAdminNotification(admin, "Elvove", "https://elvove.site/admin/bookings?booking=42", "https://elvove.site")
 			return h
 		}(),
+		"invoice": func() string {
+			_, h, _ := renderBookingInvoice(sampleBooking(), invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16"}, "Elvove", "081234567890", "https://elvove.site")
+			return h
+		}(),
+		"settlement": func() string {
+			_, h, _ := renderBookingSettlement(sampleBooking(), invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16", DownPaidAt: "2026-11-10"}, "Elvove", "081234567890", "https://elvove.site")
+			return h
+		}(),
 	} {
 		if count := strings.Count(html, emailBrandRed); count != 1 {
 			t.Errorf("%s: brand red appears %d times, want only the wordmark", name, count)
@@ -377,6 +385,129 @@ func TestAdminBookingURL(t *testing.T) {
 		if _, err := adminBookingURL(base, 7); err == nil {
 			t.Errorf("adminBookingURL(%q) should be rejected", base)
 		}
+	}
+}
+
+// The invoice is the last message of a booking: the transaction as it was paid
+// and the Drive link with the edited photos. It asks for no money, so it must
+// not carry the account or the QRIS code.
+func TestRenderBookingInvoice(t *testing.T) {
+	invoice := invoiceDetails{
+		Number:      emailInvoiceNumber(12, 2026),
+		IssuedAt:    "2026-11-16",
+		DownPaidAt:  "2026-11-10",
+		SettledAt:   "2026-11-15",
+		DeliveryURL: "https://drive.google.com/drive/folders/abc123",
+	}
+	subject, html, text := renderBookingInvoice(sampleBooking(), invoice, "Elvove", "081234567890", "https://elvove.site")
+
+	if subject != "Invoice INV-2026-0012 — Elvove" {
+		t.Errorf("subject = %q", subject)
+	}
+	for _, marker := range []string{
+		`>INVOICE</td>`,
+		`Invoice &amp; Hasil Foto`,
+		`Nomor INV-2026-0012`,
+		`Lunas pada 15 November 2026`,
+		`RINCIAN TRANSAKSI`,
+		`DP 50% Dibayar`,
+		`Pelunasan Dibayar`,
+		`FOTO SIAP DIUNDUH`,
+		`https://drive.google.com/drive/folders/abc123`,
+		`BUKA GALERI FOTO`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("html missing marker %q", marker)
+		}
+	}
+	for _, absent := range []string{`>8025325911</td>`, `src="cid:elvove-qris"`, `CARA MELUNASI`} {
+		if strings.Contains(html, absent) {
+			t.Errorf("a closed invoice must not ask for payment, found %q", absent)
+		}
+	}
+	for _, marker := range []string{
+		"INVOICE\n\n",
+		"Invoice & Hasil Foto",
+		"Nomor INV-2026-0012 · diterbitkan 16 November 2026.",
+		"Nomor Invoice    : INV-2026-0012",
+		"Status           : Lunas pada 15 November 2026",
+		"DP 50% Dibayar   : Rp1.000.000",
+		"Pelunasan Dibayar: Rp1.000.000",
+		"FOTO SIAP DIUNDUH",
+		"Foto yang sudah diedit: https://drive.google.com/drive/folders/abc123",
+	} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("text missing marker %q", marker)
+		}
+	}
+	for _, absent := range []string{"Transfer BCA", "QRIS"} {
+		if strings.Contains(text, absent) {
+			t.Errorf("a closed invoice must not ask for payment, found %q", absent)
+		}
+	}
+}
+
+// An unrecorded payment still renders, so the admin can resend an invoice while
+// the record is being fixed up rather than being blocked by the template.
+func TestRenderBookingInvoiceWithoutRecordedPayments(t *testing.T) {
+	invoice := invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16", DeliveryURL: "https://drive.google.com/x"}
+	_, html, _ := renderBookingInvoice(sampleBooking(), invoice, "Elvove", "", "https://elvove.site")
+
+	if !strings.Contains(html, "Belum ada pembayaran") {
+		t.Error("html should state that no payment is recorded")
+	}
+	if !strings.Contains(html, "https://drive.google.com/x") {
+		t.Error("html should still carry the delivery link")
+	}
+}
+
+func TestRenderBookingSettlement(t *testing.T) {
+	invoice := invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16", DownPaidAt: "2026-11-10"}
+	subject, html, text := renderBookingSettlement(sampleBooking(), invoice, "Elvove", "081234567890", "https://elvove.site")
+
+	if subject != "Pelunasan Sisa Pembayaran — Elvove" {
+		t.Errorf("subject = %q", subject)
+	}
+	for _, marker := range []string{
+		`>PELUNASAN</td>`,
+		`Pelunasan Sisa Pembayaran`,
+		`RINCIAN PELUNASAN`,
+		`SISA PEMBAYARAN`,
+		`Rp1.000.000`,
+		// The balance is due the day before the session.
+		`8 November 2026`,
+		`CARA MELUNASI`,
+		`>8025325911</td>`,
+		`src="cid:elvove-qris"`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("html missing marker %q", marker)
+		}
+	}
+	for _, marker := range []string{
+		"PELUNASAN\n\n",
+		"Sisa Pembayaran : Rp1.000.000",
+		"paling lambat 8 November 2026",
+		"Kirim bukti transfer via WhatsApp",
+	} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("text missing marker %q", marker)
+		}
+	}
+}
+
+func TestInvoiceNumberAndDueDate(t *testing.T) {
+	if got := emailInvoiceNumber(12, 2026); got != "INV-2026-0012" {
+		t.Errorf("emailInvoiceNumber = %q", got)
+	}
+	if got := emailInvoiceNumber(12345, 2026); got != "INV-2026-12345" {
+		t.Errorf("emailInvoiceNumber long id = %q", got)
+	}
+	if got := emailDueDate("2026-11-09"); got != "8 November 2026" {
+		t.Errorf("emailDueDate = %q", got)
+	}
+	if got := emailDueDate(""); got != emailPending {
+		t.Errorf("emailDueDate empty = %q", got)
 	}
 }
 

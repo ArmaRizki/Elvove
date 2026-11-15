@@ -31,6 +31,34 @@ export function statusBadge(status) {
   return STATUS_BADGES[status] || STATUS_BADGES.PENDING;
 }
 
+// Payment points of a booking: nothing yet, the down payment, or the whole
+// amount. The server derives this from the two payment dates.
+export const PAYMENT_LABELS = {
+  UNPAID: "Belum bayar",
+  DOWN_PAYMENT_PAID: "DP dibayar",
+  PAID: "Lunas",
+};
+
+export const PAYMENT_OPTIONS = [
+  { value: "UNPAID", label: "Belum bayar" },
+  { value: "DOWN_PAYMENT_PAID", label: "DP 50% dibayar" },
+  { value: "PAID", label: "Lunas" },
+];
+
+const PAYMENT_BADGES = {
+  UNPAID: "border-amber-200 bg-amber-50 text-amber-800",
+  DOWN_PAYMENT_PAID: "border-sky-200 bg-sky-50 text-sky-800",
+  PAID: "border-green-200 bg-green-50 text-green-800",
+};
+
+export function paymentLabel(paymentStatus) {
+  return PAYMENT_LABELS[paymentStatus] || PAYMENT_LABELS.UNPAID;
+}
+
+export function paymentBadge(paymentStatus) {
+  return PAYMENT_BADGES[paymentStatus] || PAYMENT_BADGES.UNPAID;
+}
+
 /**
  * "2026-11-10" or "2026-11-10T09:00:00" → "10/11/2026", the same dd/mm/yyyy
  * the booking form shows. Returns null when there is no date.
