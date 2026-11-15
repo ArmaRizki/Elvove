@@ -94,12 +94,20 @@ body {
  * colour and showed both texts on top of each other. On focus the native text
  * returns so typing stays visible. Browsers without the pseudo-element
  * (Firefox) are left untouched, because their overlay is hidden below.
+ *
+ * appearance:none is for the same kind of browser: those same versions also
+ * ignore display:none on ::-webkit-calendar-picker-indicator, so the native
+ * chevron stayed next to our own calendar button. Turning off the control's
+ * own appearance drops its inner icon; the value, typing and showPicker() (our
+ * button) keep working, and Safari keeps the rule too and is unaffected.
  */
 @supports selector(::-webkit-datetime-edit) {
   .form-field.date-input {
     color: transparent;
     /* Some Android browsers only honour this one for form-control text. */
     -webkit-text-fill-color: transparent;
+    -webkit-appearance: none;
+    appearance: none;
   }
 
   .form-field.date-input:focus {
