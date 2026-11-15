@@ -69,8 +69,8 @@ export default function Dashboard() {
           </h2>
           <p className="mt-1 text-sm text-gray-600">
             Menampilkan semua pemesanan yang memiliki tanggal acara, termasuk yang menunggu,
-            meminta ubah jadwal, diterima, dan selesai. Pilih pemesanan untuk melihat detail
-            atau mengubah jadwal.
+            meminta ubah jadwal, diterima, dan selesai. Pilih pemesanan untuk melihat detail;
+            jadwal hanya dapat diubah selama pemesanan belum diterima.
           </p>
         </div>
         <BookingCalendar />

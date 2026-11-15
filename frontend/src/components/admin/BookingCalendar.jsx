@@ -185,6 +185,14 @@ export default function BookingCalendar() {
 
   const activeDayItems = activeDay ? byDate[activeDay] || [] : [];
 
+  // A booking whose schedule is agreed (ACCEPTED) or already past (COMPLETED) is
+  // locked: the date only changes while it is still PENDING or waiting for the
+  // customer to agree to a new one. The confirmation e-mail only exists for an
+  // accepted booking, so it is the other way round.
+  const canReschedule =
+    selected?.status === "PENDING" || selected?.status === "RESCHEDULE_REQUESTED";
+  const canSendConfirmation = selected?.status === "ACCEPTED";
+
   return (
     <div className="min-w-0">
       <div className="mb-4 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -405,51 +413,62 @@ export default function BookingCalendar() {
             </div>
 
             <div className="space-y-3 border-t border-gray-200 p-4 sm:p-5">
-              <h3 className="flex items-center gap-2 font-medium">
-                <CalendarClock size={16} /> Ubah jadwal
-              </h3>
-              <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <div className="min-w-0">
-                  <label htmlFor="reschedule-date" className={adminLabel}>
-                    Tanggal baru
-                  </label>
-                  <CustomDatePicker
-                    id="reschedule-date"
-                    value={newDate}
-                    onChange={setNewDate}
-                    label="Tanggal baru"
-                    className={`${adminInput} form-field--icon flex items-center`}
-                  />
-                </div>
-                <div className="min-w-0">
-                  <label htmlFor="reschedule-time" className={adminLabel}>
-                    Waktu baru
-                  </label>
-                  <CustomTimePicker
-                    id="reschedule-time"
-                    value={newTime}
-                    onChange={setNewTime}
-                    label="Waktu baru"
-                    className={`${adminInput} form-field--icon flex items-center`}
-                  />
-                </div>
-              </div>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={reschedule}
-                className={`${adminSecondaryButton} w-full border-[#E11D48] text-[#E11D48] hover:bg-rose-50`}
-              >
-                Simpan Jadwal & Kirim Email
-              </button>
-              <button
-                type="button"
-                disabled={busy}
-                onClick={sendConfirmation}
-                className={`${adminSecondaryButton} w-full`}
-              >
-                <Mail size={15} /> Kirim Email Konfirmasi
-              </button>
+              {canReschedule && (
+                <>
+                  <h3 className="flex items-center gap-2 font-medium">
+                    <CalendarClock size={16} /> Ubah jadwal
+                  </h3>
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                    <div className="min-w-0">
+                      <label htmlFor="reschedule-date" className={adminLabel}>
+                        Tanggal baru
+                      </label>
+                      <CustomDatePicker
+                        id="reschedule-date"
+                        value={newDate}
+                        onChange={setNewDate}
+                        label="Tanggal baru"
+                        className={`${adminInput} form-field--icon flex items-center`}
+                      />
+                    </div>
+                    <div className="min-w-0">
+                      <label htmlFor="reschedule-time" className={adminLabel}>
+                        Waktu baru
+                      </label>
+                      <CustomTimePicker
+                        id="reschedule-time"
+                        value={newTime}
+                        onChange={setNewTime}
+                        label="Waktu baru"
+                        className={`${adminInput} form-field--icon flex items-center`}
+                      />
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    disabled={busy}
+                    onClick={reschedule}
+                    className={`${adminSecondaryButton} w-full border-[#E11D48] text-[#E11D48] hover:bg-rose-50`}
+                  >
+                    Simpan Jadwal & Kirim Email
+                  </button>
+                </>
+              )}
+              {canSendConfirmation && (
+                <button
+                  type="button"
+                  disabled={busy}
+                  onClick={sendConfirmation}
+                  className={`${adminSecondaryButton} w-full`}
+                >
+                  <Mail size={15} /> Kirim Email Konfirmasi
+                </button>
+              )}
+              {!canReschedule && !canSendConfirmation && (
+                <p className="text-sm text-gray-600">
+                  Pemesanan ini sudah selesai. Jadwal dan email konfirmasi tidak dapat diubah lagi.
+                </p>
+              )}
             </div>
           </div>
         </div>
