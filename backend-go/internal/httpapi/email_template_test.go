@@ -114,6 +114,43 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 	}
 }
 
+// The customer and admin e-mails are black ink on white: the only colour left
+// is the wordmark in the header and the WhatsApp button. Anything that
+// reintroduces a brand-red accent outside the wordmark fails here.
+func TestEmailsKeepOnlyTheWordmarkAndWhatsAppInColour(t *testing.T) {
+	admin := sampleBooking()
+	admin.ID = 42
+	admin.Email = "budi@example.com"
+	admin.Status = "ACCEPTED"
+
+	for name, html := range map[string]string{
+		"confirmation": func() string {
+			_, h, _ := renderBookingConfirmation(sampleBooking(), "Elvove", "081234567890", "https://elvove.site")
+			return h
+		}(),
+		"reschedule": func() string {
+			_, h, _ := renderBookingReschedule(sampleBooking(), "Elvove", "081234567890", "https://elvove.site")
+			return h
+		}(),
+		"admin": func() string {
+			_, h, _ := renderAdminNotification(admin, "Elvove", "https://elvove.site/admin/bookings?booking=42", "https://elvove.site")
+			return h
+		}(),
+	} {
+		if count := strings.Count(html, emailBrandRed); count != 1 {
+			t.Errorf("%s: brand red appears %d times, want only the wordmark", name, count)
+		}
+		if !strings.Contains(html, "color:"+emailBrandRed+";\">ELVOVE</td>") {
+			t.Errorf("%s: the one brand-red use is not the ELVOVE wordmark", name)
+		}
+		for _, retired := range []string{"#F4F1F8", "#FCEEF1", "#F8F7FB", "#EEEAF2", "#858191", "#292638"} {
+			if strings.Contains(html, retired) {
+				t.Errorf("%s: retired colour %s is still in the e-mail", name, retired)
+			}
+		}
+	}
+}
+
 func TestRenderBookingConfirmationEscapesBookingValues(t *testing.T) {
 	booking := sampleBooking()
 	booking.Name = `<script>alert("x")</script>`

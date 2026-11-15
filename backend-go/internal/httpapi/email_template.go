@@ -20,17 +20,17 @@ const (
 	emailFont       = "Inter, Arial, Helvetica, sans-serif"
 	emailFontImport = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
 
-	// Palette: white header and card on an off-white page, the site's brand red
-	// for the brand name and accents.
-	emailPage     = "#F8F7FB"
+	// Palette: black ink on white. Only the logo, the ELVOVE wordmark and the
+	// WhatsApp button keep a colour, so the message reads as one monochrome
+	// document.
+	emailPage     = "#F5F5F5"
 	emailCard     = "#FFFFFF"
-	emailDark     = "#171525"
-	emailBrandRed = "#E11D48"
-	emailText     = "#292638"
-	emailMuted    = "#858191"
-	emailInfoBg   = "#F4F1F8"
-	emailBorder   = "#EEEAF2"
-	emailBadgeBg  = "#FCEEF1"
+	emailInk      = "#000000"
+	emailOnInk    = "#FFFFFF"
+	emailBrandRed = "#E11D48" // the ELVOVE wordmark in the header, nothing else
+	emailInfoBg   = "#FFFFFF"
+	emailBorder   = "#E5E5E5"
+	emailBadgeBg  = "#000000"
 	// The same green as the floating WhatsApp button on the site.
 	emailWhatsAppGreen = "#25D366"
 
@@ -274,7 +274,7 @@ func emailBadge(text string) string {
 		"style=\"margin:0 auto;\"><tr>" +
 		"<td style=\"background:" + emailBadgeBg + ";border-radius:999px;padding:8px 14px;" +
 		"font-family:" + emailFont + ";font-size:10px;line-height:14px;font-weight:700;letter-spacing:1.5px;" +
-		"color:" + emailBrandRed + ";text-align:center;white-space:nowrap;\">" +
+		"color:" + emailOnInk + ";text-align:center;white-space:nowrap;\">" +
 		emailEscape(text) +
 		"</td></tr></table>"
 }
@@ -284,11 +284,11 @@ func emailHeadingBlock(headline, description string) string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td align=\"center\" style=\"padding:26px 0 0 0;font-family:" + emailFont + ";font-size:25px;" +
-		"line-height:35px;font-weight:400;color:" + emailText + ";text-align:center;\">" +
+		"line-height:35px;font-weight:400;color:" + emailInk + ";text-align:center;\">" +
 		emailEscape(headline) +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:12px 0 0 0;font-family:" + emailFont + ";font-size:14px;" +
-		"line-height:23px;color:" + emailMuted + ";text-align:center;\">" +
+		"line-height:23px;color:" + emailInk + ";text-align:center;\">" +
 		emailEscape(description) +
 		"</td></tr>" +
 		"</table>"
@@ -299,11 +299,11 @@ func emailGreetingBlock(greeting, paragraph string) string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:30px 0 0 0;font-family:" + emailFont + ";font-size:14px;line-height:24px;" +
-		"color:" + emailText + ";\">" +
+		"color:" + emailInk + ";\">" +
 		emailEscape(greeting) +
 		"</td></tr>" +
 		"<tr><td style=\"padding:8px 0 0 0;font-family:" + emailFont + ";font-size:14px;line-height:24px;" +
-		"color:" + emailMuted + ";\">" +
+		"color:" + emailInk + ";\">" +
 		emailEscape(paragraph) +
 		"</td></tr>" +
 		"</table>"
@@ -317,7 +317,7 @@ func emailDetailsCard(b bookingEmail) string {
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:18px 18px 4px 18px;font-family:" + emailFont + ";font-size:11px;" +
-		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailMuted + ";\">" +
+		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
 		"DETAIL BOOKING" +
 		"</td></tr>" +
 		emailDetailRow("Nama Pemesan", emailOneLine(b.Name), false, false) +
@@ -344,41 +344,42 @@ func emailPaymentBlock(b bookingEmail, siteURL string) string {
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailCard + ";\">" +
 		"<tr><td align=\"center\" style=\"padding:20px 18px 0 18px;font-family:" + emailFont + ";font-size:11px;" +
-		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailMuted + ";\">" +
+		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
 		"PEMBAYARAN" +
 		"</td></tr>" +
-		// The amount to pay now, the one figure the customer must read. The tint
-		// is what sets it apart from the white card it now sits in.
+		// The amount to pay now, the one figure the customer must read. The
+		// inset border and the larger type are what set it apart, now that
+		// colour is gone.
 		"<tr><td align=\"center\" style=\"padding:14px 18px 0 18px;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" align=\"center\" " +
 		"style=\"margin:0 auto;\">" +
 		"<tr><td align=\"center\" style=\"background:" + emailInfoBg + ";border:1px solid " + emailBorder +
 		";border-radius:8px;padding:14px 26px;font-family:" + emailFont + ";\">" +
 		"<div style=\"font-size:11px;line-height:16px;letter-spacing:1.2px;font-weight:700;" +
-		"color:" + emailMuted + ";\">DP 50% DIBAYAR SEKARANG</div>" +
+		"color:" + emailInk + ";\">DP 50% DIBAYAR SEKARANG</div>" +
 		"<div style=\"padding:4px 0 0 0;font-size:24px;line-height:32px;font-weight:700;" +
-		"color:" + emailBrandRed + ";\">" + emailDownPayment(b.PackagePrice) + "</div>" +
+		"color:" + emailInk + ";\">" + emailDownPayment(b.PackagePrice) + "</div>" +
 		"</td></tr></table>" +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:16px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
-		"line-height:18px;color:" + emailMuted + ";\">Transfer BCA</td></tr>" +
+		"line-height:18px;color:" + emailInk + ";\">Transfer BCA</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:2px 18px 0 18px;font-family:" + emailFont + ";font-size:22px;" +
-		"line-height:30px;font-weight:700;letter-spacing:1px;color:" + emailDark + ";\">" +
+		"line-height:30px;font-weight:700;letter-spacing:1px;color:" + emailInk + ";\">" +
 		emailBankAccount +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:2px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
-		"line-height:18px;color:" + emailMuted + ";\">a.n. " + emailBankHolder + "</td></tr>" +
+		"line-height:18px;color:" + emailInk + ";\">a.n. " + emailBankHolder + "</td></tr>" +
 		// The QRIS code is a static image, so it is loaded from the site the
 		// same way the header logo is; data: URIs are stripped by Gmail.
 		"<tr><td align=\"center\" style=\"padding:16px 18px 0 18px;font-family:" + emailFont + ";font-size:12px;" +
-		"line-height:18px;color:" + emailMuted + ";\">atau scan QRIS</td></tr>" +
+		"line-height:18px;color:" + emailInk + ";\">atau scan QRIS</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:10px 18px 0 18px;\">" +
 		"<img src=\"" + emailImageSource(emailQRISCID) + "\" width=\"220\" alt=\"QRIS Elvove\" " +
 		"style=\"display:block;width:220px;max-width:100%;height:auto;border:0;outline:none;" +
 		"text-decoration:none;margin:0 auto;\">" +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:8px 18px 20px 18px;font-family:" + emailFont + ";font-size:11px;" +
-		"line-height:17px;color:" + emailMuted + ";\">" +
+		"line-height:17px;color:" + emailInk + ";\">" +
 		emailQRISMerchant + " &middot; NMID " + emailQRISNMID +
 		"</td></tr>" +
 		"</table>" +
@@ -397,7 +398,7 @@ func emailAdminDetailsCard(b bookingEmail) string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;margin-top:30px;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:18px 18px 4px 18px;font-family:" + emailFont + ";font-size:11px;" +
-		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailMuted + ";\">" +
+		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
 		"DETAIL BOOKING" +
 		"</td></tr>" +
 		emailDetailRow("Nama Pemesan", emailOneLine(b.Name), false, false) +
@@ -419,13 +420,13 @@ func emailAdminButton(link string) string {
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td align=\"center\" style=\"padding:26px 0 0 0;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">" +
-		"<tr><td align=\"center\" bgcolor=\"" + emailBrandRed + "\" style=\"background:" + emailBrandRed +
+		"<tr><td align=\"center\" bgcolor=\"" + emailBadgeBg + "\" style=\"background:" + emailBadgeBg +
 		";border-radius:5px;\">" +
 		"<!--[if mso]>" +
 		"<v:roundrect xmlns:v=\"urn:schemas-microsoft-com:vml\" " +
 		"xmlns:w=\"urn:schemas-microsoft-com:office:word\" href=\"" + href + "\" " +
 		"style=\"height:46px;v-text-anchor:middle;width:230px;\" arcsize=\"10%\" stroke=\"f\" " +
-		"fillcolor=\"" + emailBrandRed + "\">" +
+		"fillcolor=\"" + emailBadgeBg + "\">" +
 		"<w:anchorlock/>" +
 		"<center style=\"color:#ffffff;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;" +
 		"letter-spacing:1px;\">BUKA DI PANEL ADMIN</center>" +
@@ -447,10 +448,9 @@ func emailDetailRow(label, value string, last, price bool) string {
 	if !last {
 		border = "border-bottom:1px solid " + emailBorder + ";"
 	}
-	valueColor := emailText
+	valueColor := emailInk
 	valueWeight := "400"
 	if price {
-		valueColor = emailBrandRed
 		valueWeight = "600"
 	}
 	// The closing row carries the card's bottom breathing room.
@@ -460,7 +460,7 @@ func emailDetailRow(label, value string, last, price bool) string {
 	}
 	return "<tr>" +
 		"<td width=\"40%\" valign=\"top\" style=\"width:40%;" + pad + border +
-		"font-family:" + emailFont + ";font-size:13px;line-height:19px;color:" + emailMuted + ";\">" +
+		"font-family:" + emailFont + ";font-size:13px;line-height:19px;color:" + emailInk + ";\">" +
 		emailEscape(label) +
 		"</td>" +
 		"<td valign=\"top\" style=\"" + pad + border + "font-family:" + emailFont + ";font-size:13px;" +
@@ -470,9 +470,8 @@ func emailDetailRow(label, value string, last, price bool) string {
 		"</tr>"
 }
 
-// The next-steps box. It is the same white bordered panel as the booking
-// details, with a red accent bar on its left edge; the bar is a table cell
-// rather than a border, because Outlook drops borders on cells.
+// The next-steps box: the same white bordered panel as the booking details,
+// with no accent bar, so the message stays monochrome.
 func emailNextStepsBlock() string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
@@ -480,13 +479,11 @@ func emailNextStepsBlock() string {
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailCard + ";\">" +
 		"<tr>" +
-		"<td width=\"3\" style=\"width:3px;background:" + emailBrandRed + ";border-radius:10px 0 0 10px;" +
-		"font-size:0;line-height:0;\">&nbsp;</td>" +
 		"<td style=\"padding:18px;\">" +
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:0 0 10px 0;font-family:" + emailFont + ";font-size:11px;" +
-		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailBrandRed + ";\">" +
+		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
 		"LANGKAH SELANJUTNYA" +
 		"</td></tr>" +
 		emailStepRow("Bayar DP 50% lewat transfer BCA atau QRIS.") +
@@ -503,9 +500,9 @@ func emailNextStepsBlock() string {
 func emailStepRow(step string) string {
 	return "<tr>" +
 		"<td width=\"14\" valign=\"top\" style=\"width:14px;padding:0 0 8px 0;font-family:" + emailFont +
-		";font-size:13px;line-height:22px;color:" + emailBrandRed + ";\">&bull;</td>" +
+		";font-size:13px;line-height:22px;color:" + emailInk + ";\">&bull;</td>" +
 		"<td valign=\"top\" style=\"padding:0 0 8px 0;font-family:" + emailFont + ";font-size:13px;" +
-		"line-height:22px;color:" + emailText + ";\">" +
+		"line-height:22px;color:" + emailInk + ";\">" +
 		emailEscape(step) +
 		"</td>" +
 		"</tr>"
@@ -562,16 +559,16 @@ func emailFooterBlock(siteURL string) string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;max-width:600px;margin:0 auto;border-collapse:collapse;\">" +
 		"<tr><td align=\"center\" style=\"padding:26px 16px 0 16px;font-family:" + emailFont + ";\">" +
-		"<div style=\"font-size:11px;line-height:16px;font-weight:700;letter-spacing:2px;color:" + emailMuted +
+		"<div style=\"font-size:11px;line-height:16px;font-weight:700;letter-spacing:2px;color:" + emailInk +
 		";\">Elvove</div>" +
-		"<div style=\"font-size:11px;line-height:18px;color:" + emailMuted + ";padding-top:6px;\">" +
+		"<div style=\"font-size:11px;line-height:18px;color:" + emailInk + ";padding-top:6px;\">" +
 		emailTagline +
 		"</div>" +
-		"<div style=\"font-size:10px;line-height:16px;color:" + emailMuted + ";padding-top:6px;\">" +
+		"<div style=\"font-size:10px;line-height:16px;color:" + emailInk + ";padding-top:6px;\">" +
 		"© " + strconv.Itoa(time.Now().Year()) + " " + emailBrandFallback + ". All rights reserved." +
 		"</div>" +
-		"<div style=\"font-size:10px;line-height:16px;color:" + emailMuted + ";padding-top:4px;\">" +
-		"<a href=\"" + emailEscape(siteURL) + "\" style=\"color:" + emailMuted + ";text-decoration:underline;\">" +
+		"<div style=\"font-size:10px;line-height:16px;color:" + emailInk + ";padding-top:4px;\">" +
+		"<a href=\"" + emailEscape(siteURL) + "\" style=\"color:" + emailInk + ";text-decoration:underline;\">" +
 		emailEscape(siteURL) +
 		"</a>" +
 		"</div>" +
