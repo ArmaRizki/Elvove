@@ -340,16 +340,17 @@ func emailPaymentBlock(b bookingEmail, siteURL string) string {
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:18px 0 0 0;\">" +
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
-		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailInfoBg + ";\">" +
+		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailCard + ";\">" +
 		"<tr><td align=\"center\" style=\"padding:20px 18px 0 18px;font-family:" + emailFont + ";font-size:11px;" +
 		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailMuted + ";\">" +
 		"PEMBAYARAN" +
 		"</td></tr>" +
-		// The amount to pay now, the one figure the customer must read.
+		// The amount to pay now, the one figure the customer must read. The tint
+		// is what sets it apart from the white card it now sits in.
 		"<tr><td align=\"center\" style=\"padding:14px 18px 0 18px;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" align=\"center\" " +
 		"style=\"margin:0 auto;\">" +
-		"<tr><td align=\"center\" style=\"background:" + emailCard + ";border:1px solid " + emailBorder +
+		"<tr><td align=\"center\" style=\"background:" + emailInfoBg + ";border:1px solid " + emailBorder +
 		";border-radius:8px;padding:14px 26px;font-family:" + emailFont + ";\">" +
 		"<div style=\"font-size:11px;line-height:16px;letter-spacing:1.2px;font-weight:700;" +
 		"color:" + emailMuted + ";\">DP 50% DIBAYAR SEKARANG</div>" +
@@ -467,18 +468,19 @@ func emailDetailRow(label, value string, last, price bool) string {
 		"</tr>"
 }
 
-// The highlighted next-steps box. The accent bar is a table cell rather than a
-// border, because Outlook drops borders on cells.
+// The next-steps box. It is the same white bordered panel as the booking
+// details, with a red accent bar on its left edge; the bar is a table cell
+// rather than a border, because Outlook drops borders on cells.
 func emailNextStepsBlock() string {
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:26px 0 0 0;\">" +
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
-		"style=\"width:100%;border-collapse:collapse;\">" +
+		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailCard + ";\">" +
 		"<tr>" +
-		"<td width=\"3\" style=\"width:3px;background:" + emailBrandRed + ";border-radius:6px 0 0 6px;" +
+		"<td width=\"3\" style=\"width:3px;background:" + emailBrandRed + ";border-radius:10px 0 0 10px;" +
 		"font-size:0;line-height:0;\">&nbsp;</td>" +
-		"<td style=\"background:" + emailInfoBg + ";border-radius:0 6px 6px 0;padding:18px;\">" +
+		"<td style=\"padding:18px;\">" +
 		"<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td colspan=\"2\" style=\"padding:0 0 10px 0;font-family:" + emailFont + ";font-size:11px;" +
