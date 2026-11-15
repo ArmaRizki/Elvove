@@ -7,6 +7,7 @@ package httpapi
 // input can never inject markup into the message.
 
 import (
+	"fmt"
 	"math"
 	"regexp"
 	"strconv"
@@ -194,6 +195,11 @@ type invoiceDetails struct {
 	DownPaidAt  string // YYYY-MM-DD; empty while no payment is recorded
 	SettledAt   string // YYYY-MM-DD; empty while the balance is open
 	DeliveryURL string // Google Drive folder with the edited photos
+	// GalleryURL is the client's photo-selection page. Empty until the admin
+	// has saved the raw photo folder, and then it is offered in the settlement
+	// notice, which is sent after the session.
+	GalleryURL     string
+	SelectionLimit int
 }
 
 // paymentStateLabel is the one line the messages show about what has arrived.
@@ -246,7 +252,12 @@ func renderBookingInvoice(b bookingEmail, invoice invoiceDetails, senderName, wh
 			{Label: "Pelunasan Dibayar", Value: emailRemainingBalance(b.PackagePrice), Price: true},
 			{Label: "Status", Value: invoice.paymentStateLabel()},
 		}) +
-		emailGalleryBlock(invoice.DeliveryURL) +
+		emailGalleryBlock(galleryBlock{
+			Title:  "FOTO SIAP DIUNDUH",
+			Note:   "Seluruh foto yang sudah diedit tersedia di Google Drive.",
+			Button: "BUKA GALERI FOTO",
+			Link:   invoice.DeliveryURL,
+		}) +
 		emailWhatsAppButton(whatsapp, siteURL)
 
 	var text strings.Builder
@@ -284,11 +295,18 @@ func renderBookingInvoice(b bookingEmail, invoice invoiceDetails, senderName, wh
 	return subject, emailDocumentTitled(body, preview, siteURL, "Invoice "+invoice.Number+" — Elvove"), text.String()
 }
 
-// emailGalleryBlock is the delivery panel: a bordered card holding the Drive
-// link as one button, so the photos are one tap away on a phone.
-func emailGalleryBlock(link string) string {
-	href := emailEscape(link)
-	label := "BUKA GALERI FOTO"
+// galleryBlock is one bordered panel: a title, one line of context and a button.
+type galleryBlock struct {
+	Title  string
+	Note   string
+	Button string
+	Link   string
+}
+
+// emailGalleryBlock renders the panel, so the photos are one tap away on a phone.
+func emailGalleryBlock(block galleryBlock) string {
+	href := emailEscape(block.Link)
+	label := block.Button
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td style=\"padding:26px 0 0 0;\">" +
@@ -296,11 +314,11 @@ func emailGalleryBlock(link string) string {
 		"style=\"width:100%;border:1px solid " + emailBorder + ";border-radius:10px;background:" + emailCard + ";\">" +
 		"<tr><td align=\"center\" style=\"padding:18px 18px 0 18px;font-family:" + emailFont + ";font-size:11px;" +
 		"line-height:16px;font-weight:700;letter-spacing:1.5px;color:" + emailInk + ";\">" +
-		"FOTO SIAP DIUNDUH" +
+		emailEscape(block.Title) +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:8px 18px 0 18px;font-family:" + emailFont + ";font-size:13px;" +
 		"line-height:20px;color:" + emailInk + ";\">" +
-		"Seluruh foto yang sudah diedit tersedia di Google Drive." +
+		emailEscape(block.Note) +
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:16px 18px 20px 18px;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">" +
@@ -323,7 +341,7 @@ func renderBookingSettlement(b bookingEmail, invoice invoiceDetails, senderName,
 	brand := emailBrandName(senderName)
 	customer := emailOneLine(b.Name)
 	remaining := emailRemainingBalance(b.PackagePrice)
-	due := emailDueDate(b.EventDate)
+	due := emailSettlementDeadline(b.EventDate, invoice.IssuedAt)
 
 	body := emailBadge("PELUNASAN") +
 		emailHeadingBlock(
@@ -332,7 +350,7 @@ func renderBookingSettlement(b bookingEmail, invoice invoiceDetails, senderName,
 		emailGreetingBlock(
 			"Halo, "+customer+".",
 			"Terima kasih telah memilih "+brand+". DP untuk sesi foto Anda sudah kami terima. "+
-				"Mohon lunasi sisa pembayaran sebesar "+remaining+" paling lambat "+due+".") +
+				"Mohon lunasi sisa pembayaran sebesar "+remaining+" "+due+".") +
 		emailCardPanel("RINCIAN PELUNASAN", []detailLine{
 			{Label: "Nomor Invoice", Value: invoice.Number},
 			{Label: "Tanggal Sesi", Value: emailTanggal(b.EventDate)},
@@ -343,9 +361,17 @@ func renderBookingSettlement(b bookingEmail, invoice invoiceDetails, senderName,
 		}) +
 		emailPaymentCard("SISA PEMBAYARAN", remaining) +
 		emailListBlock("CARA MELUNASI",
-			"Selesaikan pembayaran paling lambat "+due+".",
-			"Kirim bukti transfer via WhatsApp agar pemesanan Anda kami tandai lunas.") +
-		emailWhatsAppButton(whatsapp, siteURL)
+			"Selesaikan pembayaran "+due+".",
+			"Kirim bukti transfer via WhatsApp agar pemesanan Anda kami tandai lunas.")
+	if invoice.GalleryURL != "" {
+		body += emailGalleryBlock(galleryBlock{
+			Title:  "PILIH FOTO UNTUK DIEDIT",
+			Note:   emailSelectionNote(invoice.SelectionLimit),
+			Button: "PILIH FOTO SEKARANG",
+			Link:   invoice.GalleryURL,
+		})
+	}
+	body += emailWhatsAppButton(whatsapp, siteURL)
 
 	var text strings.Builder
 	text.WriteString("PELUNASAN\n\n")
@@ -353,7 +379,7 @@ func renderBookingSettlement(b bookingEmail, invoice invoiceDetails, senderName,
 	text.WriteString("Sisa pembayaran sesi foto Anda pada " + emailTanggal(b.EventDate) + ".\n\n")
 	text.WriteString("Halo, " + customer + ".\n\n")
 	text.WriteString("Terima kasih telah memilih " + brand + ". DP untuk sesi foto Anda sudah kami terima. ")
-	text.WriteString("Mohon lunasi sisa pembayaran paling lambat " + due + ".\n\n")
+	text.WriteString("Mohon lunasi sisa pembayaran " + due + ".\n\n")
 	text.WriteString("RINCIAN PELUNASAN\n")
 	text.WriteString("Nomor Invoice   : " + invoice.Number + "\n")
 	text.WriteString("Tanggal Sesi    : " + emailTanggal(b.EventDate) + "\n")
@@ -363,8 +389,13 @@ func renderBookingSettlement(b bookingEmail, invoice invoiceDetails, senderName,
 	text.WriteString("Sisa Pembayaran : " + remaining + "\n\n")
 	text.WriteString(emailPaymentInstructions("Sisa Pembayaran", remaining, siteURL))
 	text.WriteString("\nCARA MELUNASI\n")
-	text.WriteString("• Selesaikan pembayaran paling lambat " + due + ".\n")
+	text.WriteString("• Selesaikan pembayaran " + due + ".\n")
 	text.WriteString("• Kirim bukti transfer via WhatsApp agar pemesanan Anda kami tandai lunas.\n")
+	if invoice.GalleryURL != "" {
+		text.WriteString("\nPILIH FOTO UNTUK DIEDIT\n")
+		text.WriteString(emailSelectionNote(invoice.SelectionLimit) + "\n")
+		text.WriteString(invoice.GalleryURL + "\n")
+	}
 	if url := emailWhatsAppURL(whatsapp); url != "" {
 		text.WriteString("\nWhatsApp: " + url + "\n")
 	}
@@ -397,6 +428,28 @@ func emailDueDate(eventDate string) string {
 		return emailTanggal(eventDate)
 	}
 	return emailTanggal(date.AddDate(0, 0, -1).Format("2006-01-02"))
+}
+
+// emailSettlementDeadline words the payment point for the day the notice goes
+// out: before the session it is the day before that session, and once the
+// session has passed (the notice is sent after the shoot, together with the
+// photo selection) a date in the past would be wrong.
+func emailSettlementDeadline(eventDate, issuedAt string) string {
+	due := emailDueDate(eventDate)
+	session, err := time.Parse("2006-01-02", strings.TrimSpace(eventDate))
+	issued, issuedErr := time.Parse("2006-01-02", strings.TrimSpace(issuedAt))
+	if err != nil || issuedErr != nil || !issued.After(session) {
+		return "paling lambat " + due
+	}
+	return "secepatnya"
+}
+
+// emailSelectionNote is the one line under the photo-selection button.
+func emailSelectionNote(limit int) string {
+	if limit < 1 {
+		return "Pilih foto yang ingin Anda minta untuk diedit."
+	}
+	return fmt.Sprintf("Pilih maksimal %d foto yang ingin Anda minta untuk diedit.", limit)
 }
 
 // emailSiteURL mirrors Java's constructor: a blank address falls back to the

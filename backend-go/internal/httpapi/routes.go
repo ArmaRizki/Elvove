@@ -20,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/elvove/photography/backend-go/internal/config"
+	"github.com/elvove/photography/backend-go/internal/drive"
 	"github.com/elvove/photography/backend-go/internal/store"
 	"github.com/jackc/pgx/v5"
 )
@@ -33,6 +34,12 @@ type Server struct {
 	// e-mail twice for one booking.
 	mailMu  sync.Mutex
 	mailing map[int64]bool
+	// Drive is the Google Drive client for the client photo-selection page. It
+	// is disabled when the OAuth credentials are absent.
+	Drive *drive.Client
+	// galleryMu serializes the WebP conversion of one photo, so a grid of
+	// thumbnails does not convert the same original twice.
+	galleryMu sync.Map
 }
 
 type decimalValue string
@@ -51,6 +58,7 @@ func NewServer(cfg config.Config, db *store.Store) *Server {
 	limiter := NewRateLimiter()
 	s := &Server{Config: cfg, Store: db, Limiter: limiter, mailing: make(map[int64]bool)}
 	s.Auth = &Auth{Store: db, Secret: cfg.JWTSecret, Limiter: limiter, MaxAge: 24 * time.Hour}
+	s.Drive = drive.New(cfg.GoogleDrive.ClientID, cfg.GoogleDrive.ClientSecret, cfg.GoogleDrive.RefreshToken, cfg.GoogleDrive.TokenURL, cfg.GoogleDrive.APIBase, cfg.GoogleDrive.UploadBase)
 	return s
 }
 
@@ -110,6 +118,7 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("POST /api/admin/bookings/{id}/settlement-email", s.sendBookingSettlement)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/payment", s.updateBookingPayment)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/delivery", s.updateBookingDelivery)
+	admin.HandleFunc("PATCH /api/admin/bookings/{id}/raw-folder", s.updateBookingRawFolder)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/reschedule", s.rescheduleBooking)
 	admin.HandleFunc("DELETE /api/admin/bookings/{id}", s.deleteBooking)
 	admin.HandleFunc("POST /api/admin/upload", s.upload)
@@ -132,6 +141,13 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("PUT /api/admin/settings/booking-notifications", s.saveNotificationSettings)
 	admin.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { writeNotFound(w) })
 	mux.Handle("/api/admin/", s.Auth.Middleware(s.Auth.RequireAdmin(admin)))
+	// The client photo-selection page. The token in the path is the only key:
+	// without it there is nothing to guess, so these stay outside the admin
+	// middleware.
+	mux.HandleFunc("GET /api/gallery/{token}", s.getGallery)
+	mux.HandleFunc("GET /api/gallery/{token}/photos/{id}", s.galleryPhoto)
+	mux.HandleFunc("PUT /api/gallery/{token}/selection", s.saveSelection)
+	mux.HandleFunc("POST /api/gallery/{token}/submit", s.submitSelection)
 	mux.HandleFunc("POST /api/bookings", s.createBooking)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Spring Security runs before the router, so an unknown path only reaches
@@ -242,24 +258,27 @@ func (s *Server) getCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPackages(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.Pool.Query(r.Context(), `SELECT p.id, p.title, p.price, p.display_order, p.highlighted, COALESCE((SELECT json_agg(pf.feature) FROM package_features pf WHERE pf.package_id = p.id), '[]'::json) AS features FROM packages p ORDER BY p.display_order ASC`)
+	rows, err := s.Store.Pool.Query(r.Context(), `SELECT p.id, p.title, p.price, p.display_order, p.highlighted, p.photo_selection_limit, COALESCE((SELECT json_agg(pf.feature) FROM package_features pf WHERE pf.package_id = p.id), '[]'::json) AS features FROM packages p ORDER BY p.display_order ASC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat paket.")
 		return
 	}
 	defer rows.Close()
 	type item struct {
-		ID           int64           `json:"id"`
-		Title        string          `json:"title"`
-		Price        decimalValue    `json:"price"`
-		DisplayOrder int             `json:"displayOrder"`
-		Highlighted  bool            `json:"highlighted"`
-		Features     json.RawMessage `json:"features"`
+		ID           int64        `json:"id"`
+		Title        string       `json:"title"`
+		Price        decimalValue `json:"price"`
+		DisplayOrder int          `json:"displayOrder"`
+		Highlighted  bool         `json:"highlighted"`
+		// PhotoSelectionLimit is the number of raw photos the client may pick
+		// from this package; 0 means the package includes no selection.
+		PhotoSelectionLimit int             `json:"photoSelectionLimit"`
+		Features            json.RawMessage `json:"features"`
 	}
 	items := make([]item, 0)
 	for rows.Next() {
 		var current item
-		if err := rows.Scan(&current.ID, &current.Title, &current.Price, &current.DisplayOrder, &current.Highlighted, &current.Features); err != nil {
+		if err := rows.Scan(&current.ID, &current.Title, &current.Price, &current.DisplayOrder, &current.Highlighted, &current.PhotoSelectionLimit, &current.Features); err != nil {
 			writeError(w, http.StatusInternalServerError, "Gagal memuat paket.")
 			return
 		}
@@ -396,7 +415,7 @@ func (s *Server) dashboardSummary(w http.ResponseWriter, r *http.Request) {
 // paths format price and time the same way (Java returns one BookingResponse).
 // Spring Boot disables WRITE_DATES_AS_TIMESTAMPS, so Jackson writes LocalTime as
 // the ISO string "09:30:00", which is exactly what the admin UI parses.
-const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount", down_payment_paid_at AS "downPaymentPaidAt", settlement_paid_at AS "settlementPaidAt", invoice_email_sent_at AS "invoiceEmailSentAt", COALESCE(invoice_email_count, 0) AS "invoiceEmailCount", settlement_email_sent_at AS "settlementEmailSentAt", COALESCE(settlement_email_count, 0) AS "settlementEmailCount", COALESCE(delivery_url, '') AS "deliveryUrl", CASE WHEN settlement_paid_at IS NOT NULL THEN 'PAID' WHEN down_payment_paid_at IS NOT NULL THEN 'DOWN_PAYMENT_PAID' ELSE 'UNPAID' END AS "paymentStatus" FROM bookings`
+const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount", down_payment_paid_at AS "downPaymentPaidAt", settlement_paid_at AS "settlementPaidAt", invoice_email_sent_at AS "invoiceEmailSentAt", COALESCE(invoice_email_count, 0) AS "invoiceEmailCount", settlement_email_sent_at AS "settlementEmailSentAt", COALESCE(settlement_email_count, 0) AS "settlementEmailCount", COALESCE(delivery_url, '') AS "deliveryUrl", COALESCE(selection_token, '') AS "selectionToken", COALESCE(raw_folder_id, '') AS "rawFolderId", COALESCE(selection_folder_id, '') AS "selectionFolderId", COALESCE(selection_limit, 0) AS "selectionLimit", selection_submitted_at AS "selectionSubmittedAt", (SELECT count(*) FROM booking_photos bp WHERE bp.booking_id = bookings.id) AS "photoCount", (SELECT count(*) FROM booking_photos bp WHERE bp.booking_id = bookings.id AND bp.selected) AS "selectedCount", CASE WHEN settlement_paid_at IS NOT NULL THEN 'PAID' WHEN down_payment_paid_at IS NOT NULL THEN 'DOWN_PAYMENT_PAID' ELSE 'UNPAID' END AS "paymentStatus" FROM bookings`
 
 func normalizeBooking(booking map[string]any) {
 	if price, ok := booking["packagePrice"].(string); ok && decimalPattern.MatchString(price) {
@@ -533,7 +552,8 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	// Validation guarantees a non-nil id by this point.
 	packageID := *request.PackageID
 	var packageTitle, packagePrice string
-	err = tx.QueryRow(ctx, `SELECT title, price::text FROM packages WHERE id = $1`, packageID).Scan(&packageTitle, &packagePrice)
+	var packageSelectionLimit int
+	err = tx.QueryRow(ctx, `SELECT title, price::text, photo_selection_limit FROM packages WHERE id = $1`, packageID).Scan(&packageTitle, &packagePrice, &packageSelectionLimit)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Java raises ResourceNotFoundException -> 404 with the id echoed back.
@@ -574,7 +594,7 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	// Java's BookingRequest takes eventTime as LocalTime; Spring writes it back as
 	// the ISO string "09:30:00".
 	eventTimeString := eventTime.Format("15:04:05")
-	err = tx.QueryRow(ctx, `INSERT INTO bookings (name, email, phone, event_date, event_time, package_title, package_price, event_location, message, terms_accepted, terms_accepted_at, terms_version, status, confirmation_email_count, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,'PENDING',0,$10,$10) RETURNING id, created_at, updated_at, confirmation_email_count`, request.Name, request.Email, request.Phone, eventDate, eventTimeString, packageTitle, packagePrice, optionalText(request.EventLocation), optionalText(request.Message), now, request.TermsVersion).Scan(&id, &createdAt, &updatedAt, &confirmationCount)
+	err = tx.QueryRow(ctx, `INSERT INTO bookings (name, email, phone, event_date, event_time, package_title, package_price, event_location, message, terms_accepted, terms_accepted_at, terms_version, status, confirmation_email_count, selection_token, selection_limit, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,'PENDING',0,$12,$13,$10,$10) RETURNING id, created_at, updated_at, confirmation_email_count`, request.Name, request.Email, request.Phone, eventDate, eventTimeString, packageTitle, packagePrice, optionalText(request.EventLocation), optionalText(request.Message), now, request.TermsVersion, newSelectionToken(), packageSelectionLimit).Scan(&id, &createdAt, &updatedAt, &confirmationCount)
 	if err != nil {
 		fail("insert booking", err)
 		return

@@ -18,10 +18,11 @@ This README records what changed.
 |---|---|---|
 | Backend | Spring Boot 3.3.4 · Java 17 · JPA/Hibernate | Go 1.23+ · `net/http` · pgx v5 — Java kept as reference |
 | Content modules | Galleries, Services, Testimonials, Videos | Removed; replaced by Terms, SMTP and booking-notification settings |
-| Public pages | 14 | 10 |
+| Public pages | 14 | 11 (new: photo selection) |
 | Admin sections | 13 | 11 (new: calendar, Terms, SMTP; 5 modules gone) |
 | Booking flow | `PENDING → CONTACTED → COMPLETED` | `PENDING → ACCEPTED → COMPLETED`, with `RESCHEDULE_REQUESTED` only while the date is not yet agreed |
 | E-mail | none | SMTP stored in DB, confirmation, invoice, settlement, reschedule and admin notifications |
+| Photo selection | none | `/pilih/<token>` per booking: WebP previews from the raw Drive folder, a per-package quota, the picks copied into `mustedit` |
 | Uploads | 10 MB, extension check only | 50/100 MB, magic-byte check, WebP thumbnail + preview, original admin-only |
 | First admin | hard-coded `admin` / `admin123` | env bootstrap, only while the table is empty, with Java's password rules |
 | JWT secret | hard-coded in `application.yml` | environment variable, at least 32 bytes |
@@ -124,6 +125,47 @@ terms-and-conditions.
   whatever the browser locale is. They still hand the API a `YYYY-MM-DD` date
   and an `HH:mm` time.
 
+### Raw photo selection
+
+- The photographer keeps the raw photos in one Google Drive folder per booking.
+  The admin pastes the folder link in the booking detail panel (`PATCH
+  /api/admin/bookings/{id}/raw-folder`); the folder is opened once through the
+  Drive API before it is saved, so a typo is caught in the panel instead of by
+  the client.
+- Each booking carries a `selection_token` (32 random hex characters, created
+  with the booking and unique per booking). The client page lives at
+  `/pilih/<token>`; the token is the only credential, so there is nothing to
+  guess and the page never asks for an e-mail or phone number.
+- The settlement e-mail carries a **PILIH FOTO UNTUK DIEDIT** button with that
+  link, which is why the settlement notice is sent after the session. Its
+  payment deadline adapts: `paling lambat <H-1>` before the session,
+  `secepatnya` once the session has passed, so it never states a past date.
+- The page shows a grid of previews. Each preview is converted from the original
+  to WebP (1600 px, q78) by `cwebp`, uploaded to a `webp` subfolder of the raw
+  folder, and cached on disk under `UPLOAD_DIR/gallery/<token>/`, so Drive is
+  read once per photo. Only one conversion per photo runs at a time.
+- The quota per package is `packages.photo_selection_limit`, edited in
+  `/admin/packages` (0–1000; e.g. Origin 10, Ascend 30). It is copied to
+  `bookings.selection_limit` at booking time — a snapshot, like
+  `package_title` and `package_price`, so later price/quota edits do not change
+  an existing booking.
+- Picking saves as the client clicks (`PUT /api/gallery/{token}/selection`); the
+  server enforces the quota and refuses ids that are not in the folder.
+- `POST /api/gallery/{token}/submit` finishes the choice: it creates a
+  `mustedit` folder next to the raw photos and **copies** the chosen originals
+  into it at full resolution (not the WebP preview). The raw folder is never
+  moved or deleted. A retry skips names already copied, so a partial failure
+  does not duplicate files. The selection is then locked
+  (`selection_submitted_at`), and further saves or submits answer `409`.
+- Without `GOOGLE_OAUTH_*` the endpoints answer `503` and the page says the
+  feature is unavailable; the rest of the site is unaffected.
+- Drive access uses OAuth on the account that owns the photos: a service
+  account has no storage quota of its own, so it can read a shared folder but
+  cannot upload into it. `go run ./cmd/driveauth` performs the consent once and
+  prints the refresh token for `GOOGLE_OAUTH_REFRESH_TOKEN`. The OAuth consent
+  screen must be published: while the app is in *Testing*, Google expires
+  refresh tokens after seven days.
+
 ### Terms & Conditions
 
 - `site_terms` holds the document and an incrementing `version`.
@@ -190,18 +232,23 @@ session.
 
 ## 5. Database
 
-13 tables:
+14 tables:
 
 `admins`, `categories`, `photos`, `packages`, `package_features`, `bookings`,
 `contact_info`, `about_info`, `social_links`, `site_terms`,
 `smtp_settings`, `booking_notification_settings`,
-`booking_notification_recipients`.
+`booking_notification_recipients`, `booking_photos`.
 
 New since Lens & Light: `site_terms`, `smtp_settings`, the two notification
 tables, plus `booking` columns for terms acceptance, confirmation-email
 tracking, the two recorded payment points, the Drive link to the edited photos
 and the invoice / settlement delivery logs
 (`db/migrations/2026-11-16-booking-payment-tracking.sql`).
+`booking_photos` (a cache of what a booking's Drive folder holds, with the WebP
+file id and the selection), `packages.photo_selection_limit` and the booking
+selection columns (`selection_token`, `selection_limit`, `raw_folder_id`,
+`selection_folder_id`, `selection_submitted_at`) arrive in
+`db/migrations/2026-11-16-photo-selection.sql`.
 `galleries`, `services`, `testimonials`, `videos` and `faqs` no longer exist.
 
 Schema changes are handwritten SQL in `db/migrations/`, applied by hand.
@@ -214,7 +261,11 @@ The Go backend never creates or alters tables.
 - Rebranded from Lens & Light to ELVOVE: logo, canonical URL, and a light theme
   with a crimson accent (`#E11D48`) replacing the dark ink/brass palette.
 - `lucide-react` upgraded from `0.383.0` to `^1.70.0`; `react-icons` added.
-- New admin screens: calendar, Terms editor, SMTP settings.
+- New admin screens: calendar, Terms editor, SMTP settings, plus a raw-photo
+  panel per booking (Drive folder, the client's selection link, progress) and
+  the selection quota field in `/admin/packages`.
+- `/pilih/:token` is the client page for picking the photos to edit. It is a
+  public route outside the admin layout, and it reads nothing without the token.
 - Shared `AdminResourceManager` for the simple CRUD lists, plus `AdminLayout`,
   `EmptyState`, `LoadingState`, `CustomTimePicker` and `WhatsAppButton`.
 - `utils/bookingTime.js`, `utils/richText.js` and `utils/uploadLimits.js` keep
@@ -234,12 +285,15 @@ nginx frontend and the proxy, with the database and uploads on named/bind mounts
 - `nginx/default.conf`: proxies `/api` and `/uploads`, serves the SPA, and
   applies rate limiting plus security headers.
 - `backend-go/scripts/`: `run-web.sh` (the stack behind nginx),
-  `set-dev-admin.sh` (admin password on the throwaway copy database) and
-  `verify-staging.sh` (end-to-end checks).
+  `set-dev-admin.sh` (admin password on the throwaway copy database),
+  `verify-staging.sh` (end-to-end checks) and `verify-gallery.sh` (the photo
+  selection endpoints against a stubbed Google Drive).
 
 Backend environment: `DB_*` or `DB_URL`, `JWT_SECRET`, `SMTP_ENCRYPTION_KEY`,
 `FRONTEND_URL`, `MAIL_SITE_URL`, `MAIL_ADMIN_URL`, `ADMIN_*`,
-`UPLOAD_MAX_FILE_SIZE`, `UPLOAD_MAX_REQUEST_SIZE`, `PORT`, `UPLOAD_DIR`.
+`UPLOAD_MAX_FILE_SIZE`, `UPLOAD_MAX_REQUEST_SIZE`, `PORT`, `UPLOAD_DIR`,
+and `GOOGLE_OAUTH_CLIENT_ID` / `GOOGLE_OAUTH_CLIENT_SECRET` /
+`GOOGLE_OAUTH_REFRESH_TOKEN` for the photo selection page.
 
 ---
 
@@ -251,7 +305,10 @@ backend-go/          Go API (the running backend)
   internal/config/   environment parsing
   internal/httpapi/  routes, handlers, auth, validation, e-mail
   internal/store/    pgx pool and query helpers
-  scripts/           run-web.sh, set-dev-admin.sh, verify-staging.sh
+  cmd/driveauth/     one-off OAuth consent, prints the Drive refresh token
+  internal/drive/    Google Drive REST client
+  scripts/           run-web.sh, set-dev-admin.sh, verify-staging.sh,
+                     verify-gallery.sh
 frontend/            React 19 + Vite + Tailwind
   src/pages/         public pages
   src/pages/admin/   admin screens
@@ -264,14 +321,22 @@ compose.yml          local stack
 
 ## 9. Tests
 
-- 9 Go test files covering auth, the limiter, booking validation and dates,
-  e-mail rendering, SMTP encryption and the store.
-- `backend-go/scripts/verify-staging.sh` drives a real stack end to end with 25
+- Go test files covering auth, the limiter, booking validation and dates,
+  e-mail rendering (invoice, settlement, the adaptive payment deadline),
+  SMTP encryption, the store and the Drive client.
+- `backend-go/scripts/verify-staging.sh` drives a real stack end to end with 47
   assertions (status workflow, WIB timestamps, SMTP failure rollback, upload
-  limits, CORS, photo variants).
+  limits, CORS, photo variants, the three customer e-mails).
+- `backend-go/scripts/verify-gallery.sh` covers the photo selection page with 33
+  assertions against a stub Drive: token access, folder validation, the package
+  quota, the one-conversion-per-photo WebP preview, the `mustedit` copy and the
+  lock after submit. It runs the backend from its Docker image, because the WebP
+  conversion needs `cwebp`, which only the image carries.
 
 ```bash
 cd backend-go && go test ./...
+cd backend-go && ./scripts/verify-staging.sh
+cd backend-go && ./scripts/verify-gallery.sh   # needs Docker
 ```
 
 ---
@@ -295,6 +360,21 @@ docker compose up -d --build
   ```
 
 The Go backend creates no default admin. Uploads live in `./local-data/uploads`.
+
+The photo selection page (`/pilih/<token>`) also needs Google Drive, which is
+optional: without the three `GOOGLE_OAUTH_*` values the page answers that it is
+unavailable and every other part of the site works as before. To switch it on,
+create an OAuth client of type *Desktop app* in Google Cloud Console, enable the
+Drive API, publish the consent screen, then run:
+
+```bash
+cd backend-go
+GOOGLE_OAUTH_CLIENT_ID=... GOOGLE_OAUTH_CLIENT_SECRET=... go run ./cmd/driveauth
+```
+
+Paste the printed refresh token into `GOOGLE_OAUTH_REFRESH_TOKEN` in `.env`.
+The token belongs to the account that owns the photo folders; it is never
+committed.
 
 ---
 

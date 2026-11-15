@@ -183,6 +183,9 @@ type packageRequest struct {
 	Features     []string    `json:"features"`
 	DisplayOrder *int        `json:"displayOrder"`
 	Highlighted  bool        `json:"highlighted"`
+	// PhotoSelectionLimit is how many raw photos the client may pick from this
+	// package ("Origin: 10"). Zero means the package includes no selection.
+	PhotoSelectionLimit *int `json:"photoSelectionLimit"`
 }
 
 func (s *Server) createPackage(w http.ResponseWriter, r *http.Request) { s.savePackage(w, r, 0, true) }
@@ -213,6 +216,15 @@ func (s *Server) savePackage(w http.ResponseWriter, r *http.Request, id int64, c
 	} else if !ok || !decimalValid || price.Sign() <= 0 || len(req.Price) > 13 {
 		fieldErrors["price"] = "Price must be positive"
 	}
+	limit := 0
+	if req.PhotoSelectionLimit != nil {
+		limit = *req.PhotoSelectionLimit
+	}
+	// A negative count is meaningless; the upper bound keeps a typo from
+	// promising a folder-sized selection.
+	if limit < 0 || limit > 1000 {
+		fieldErrors["photoSelectionLimit"] = "Jumlah foto pilihan harus antara 0 dan 1000"
+	}
 	if len(fieldErrors) > 0 {
 		writeValidationError(w, fieldErrors)
 		return
@@ -239,11 +251,11 @@ func (s *Server) savePackage(w http.ResponseWriter, r *http.Request, id int64, c
 	defer tx.Rollback(r.Context())
 	var pkgID int64
 	if create {
-		err = tx.QueryRow(r.Context(), `INSERT INTO packages(title,price,display_order,highlighted,created_at,updated_at) VALUES($1,$2,$3,$4,NOW(),NOW()) RETURNING id`, title, string(req.Price), order, req.Highlighted).Scan(&pkgID)
+		err = tx.QueryRow(r.Context(), `INSERT INTO packages(title,price,display_order,highlighted,photo_selection_limit,created_at,updated_at) VALUES($1,$2,$3,$4,$5,NOW(),NOW()) RETURNING id`, title, string(req.Price), order, req.Highlighted, limit).Scan(&pkgID)
 	} else {
 		// Java replaces the whole record: a missing displayOrder resets it to
 		// 0 (PackageItemService.apply) instead of keeping the previous value.
-		err = tx.QueryRow(r.Context(), `UPDATE packages SET title=$1,price=$2,display_order=$3,highlighted=$4,updated_at=NOW() WHERE id=$5 RETURNING id`, title, string(req.Price), order, req.Highlighted, id).Scan(&pkgID)
+		err = tx.QueryRow(r.Context(), `UPDATE packages SET title=$1,price=$2,display_order=$3,highlighted=$4,photo_selection_limit=$5,updated_at=NOW() WHERE id=$6 RETURNING id`, title, string(req.Price), order, req.Highlighted, limit, id).Scan(&pkgID)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -271,7 +283,7 @@ func (s *Server) savePackage(w http.ResponseWriter, r *http.Request, id int64, c
 	if !create && req.DisplayOrder == nil {
 		_ = s.Store.Pool.QueryRow(r.Context(), `SELECT display_order FROM packages WHERE id=$1`, pkgID).Scan(&order)
 	}
-	response := map[string]any{"id": pkgID, "title": title, "price": decimalValue(req.Price.String()), "features": features, "displayOrder": order, "highlighted": req.Highlighted}
+	response := map[string]any{"id": pkgID, "title": title, "price": decimalValue(req.Price.String()), "features": features, "displayOrder": order, "highlighted": req.Highlighted, "photoSelectionLimit": limit}
 	status := 200
 	if create {
 		status = 201
@@ -836,19 +848,34 @@ type mailBooking struct {
 	DownPaidAt  string // YYYY-MM-DD; empty when no payment is recorded
 	SettledAt   string // YYYY-MM-DD; empty when the balance is still open
 	DeliveryURL string // Google Drive folder with the edited photos
+	// The client photo-selection link travels in the settlement notice, so the
+	// customer picks the photos to edit in the same message that closes payment.
+	SelectionToken string
+	SelectionLimit int
 }
 
-// invoiceDetails turns the recorded payment dates and the delivery link into
-// what the invoice and the settlement notice print.
+// invoiceDetails turns the recorded payment dates, the delivery link and the
+// photo-selection link into what the invoice and the settlement notice print.
 func (b mailBooking) invoiceDetails(now time.Time) invoiceDetails {
 	number := emailInvoiceNumber(b.ID, now.Year())
 	return invoiceDetails{
-		Number:      number,
-		IssuedAt:    now.Format("2006-01-02"),
-		DownPaidAt:  b.DownPaidAt,
-		SettledAt:   b.SettledAt,
-		DeliveryURL: b.DeliveryURL,
+		Number:         number,
+		IssuedAt:       now.Format("2006-01-02"),
+		DownPaidAt:     b.DownPaidAt,
+		SettledAt:      b.SettledAt,
+		DeliveryURL:    b.DeliveryURL,
+		SelectionLimit: b.SelectionLimit,
 	}
+}
+
+// selectionLink is the absolute address of the client page, built from the site
+// address the mail is rendered with so the customer opens the same host. A
+// package with no photo quota has no page worth opening, so no link is printed.
+func (b mailBooking) selectionLink(siteURL string) string {
+	if b.SelectionToken == "" || b.SelectionLimit < 1 {
+		return ""
+	}
+	return strings.TrimRight(emailSiteURL(siteURL), "/") + "/pilih/" + b.SelectionToken
 }
 
 // loadMailBooking reads one booking for an e-mail endpoint. A missing row comes
@@ -1012,7 +1039,9 @@ func (s *Server) sendBookingSettlement(w http.ResponseWriter, r *http.Request) {
 			return ""
 		},
 		Render: func(b mailBooking, sender, whatsapp, siteURL string) (string, string, string) {
-			return renderBookingSettlement(b.bookingEmail, b.invoiceDetails(nowWallClock()), sender, whatsapp, siteURL)
+			details := b.invoiceDetails(nowWallClock())
+			details.GalleryURL = b.selectionLink(siteURL)
+			return renderBookingSettlement(b.bookingEmail, details, sender, whatsapp, siteURL)
 		},
 	})
 }

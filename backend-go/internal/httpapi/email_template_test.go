@@ -461,8 +461,9 @@ func TestRenderBookingInvoiceWithoutRecordedPayments(t *testing.T) {
 	}
 }
 
+// Sent before the session, the notice names the day before it as the deadline.
 func TestRenderBookingSettlement(t *testing.T) {
-	invoice := invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16", DownPaidAt: "2026-11-10"}
+	invoice := invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-01", DownPaidAt: "2026-11-10"}
 	subject, html, text := renderBookingSettlement(sampleBooking(), invoice, "Elvove", "081234567890", "https://elvove.site")
 
 	if subject != "Pelunasan Sisa Pembayaran — Elvove" {
@@ -493,6 +494,85 @@ func TestRenderBookingSettlement(t *testing.T) {
 		if !strings.Contains(text, marker) {
 			t.Errorf("text missing marker %q", marker)
 		}
+	}
+	for _, absent := range []string{"PILIH FOTO UNTUK DIEDIT", "https://elvove.site/pilih/"} {
+		if strings.Contains(html, absent) {
+			t.Errorf("without a raw folder the notice must not offer a selection link, found %q", absent)
+		}
+	}
+}
+
+// The notice goes out after the shoot too, once the photos are ready to pick.
+// Then the day before the session is in the past and a deadline would be wrong.
+func TestRenderBookingSettlementAfterSession(t *testing.T) {
+	invoice := invoiceDetails{
+		Number:         "INV-2026-0012",
+		IssuedAt:       "2026-11-16",
+		DownPaidAt:     "2026-11-10",
+		GalleryURL:     "https://elvove.site/pilih/abc123",
+		SelectionLimit: 30,
+	}
+	_, html, text := renderBookingSettlement(sampleBooking(), invoice, "Elvove", "081234567890", "https://elvove.site")
+
+	if strings.Contains(text, "paling lambat 8 November 2026") {
+		t.Error("a notice sent after the session must not claim a deadline in the past")
+	}
+	for _, marker := range []string{
+		"secepatnya",
+		"PILIH FOTO UNTUK DIEDIT",
+		"Pilih maksimal 30 foto",
+		"https://elvove.site/pilih/abc123",
+	} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("text missing marker %q", marker)
+		}
+	}
+	for _, marker := range []string{
+		`PILIH FOTO UNTUK DIEDIT`,
+		`PILIH FOTO SEKARANG`,
+		`https://elvove.site/pilih/abc123`,
+		`Pilih maksimal 30 foto`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("html missing marker %q", marker)
+		}
+	}
+}
+
+func TestEmailSelectionNote(t *testing.T) {
+	if got := emailSelectionNote(10); got != "Pilih maksimal 10 foto yang ingin Anda minta untuk diedit." {
+		t.Errorf("emailSelectionNote = %q", got)
+	}
+	if got := emailSelectionNote(0); !strings.Contains(got, "Pilih foto") {
+		t.Errorf("emailSelectionNote without a limit = %q", got)
+	}
+}
+
+// A package without a photo quota gets no link: there is nothing to pick.
+func TestSettlementLinkNeedsAQuota(t *testing.T) {
+	b := mailBooking{SelectionToken: "abc123", SelectionLimit: 0}
+	if got := b.selectionLink("https://elvove.site"); got != "" {
+		t.Errorf("selectionLink without a quota = %q, want empty", got)
+	}
+	b.SelectionLimit = 10
+	if got := b.selectionLink("https://elvove.site/"); got != "https://elvove.site/pilih/abc123" {
+		t.Errorf("selectionLink = %q", got)
+	}
+	b.SelectionToken = ""
+	if got := b.selectionLink("https://elvove.site"); got != "" {
+		t.Errorf("selectionLink without a token = %q, want empty", got)
+	}
+}
+
+func TestEmailSettlementDeadline(t *testing.T) {
+	if got := emailSettlementDeadline("2026-11-09", "2026-11-01"); got != "paling lambat 8 November 2026" {
+		t.Errorf("before the session = %q", got)
+	}
+	if got := emailSettlementDeadline("2026-11-09", "2026-11-16"); got != "secepatnya" {
+		t.Errorf("after the session = %q", got)
+	}
+	if got := emailSettlementDeadline("", ""); got == "" {
+		t.Error("an unreadable date must still produce a phrase")
 	}
 }
 

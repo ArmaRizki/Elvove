@@ -47,6 +47,11 @@ services:
       ADMIN_USERNAME: ${ADMIN_USERNAME:-admin}
       ADMIN_EMAIL: ${ADMIN_EMAIL:-elvo.vee@gmail.com}
       ADMIN_PASSWORD: ${ADMIN_PASSWORD:-}
+      # Google Drive for the client photo-selection page. Empty values keep the
+      # feature off, so a deployment without Drive still starts.
+      GOOGLE_OAUTH_CLIENT_ID: ${GOOGLE_OAUTH_CLIENT_ID:-}
+      GOOGLE_OAUTH_CLIENT_SECRET: ${GOOGLE_OAUTH_CLIENT_SECRET:-}
+      GOOGLE_OAUTH_REFRESH_TOKEN: ${GOOGLE_OAUTH_REFRESH_TOKEN:-}
       # Upload limits. Both accept size syntax ("50MB", "100MB"). Keep
       # UPLOAD_MAX_REQUEST_SIZE in step with nginx/default.conf's
       # client_max_body_size.

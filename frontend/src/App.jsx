@@ -18,6 +18,7 @@ const Contact = lazy(() => import("./pages/Contact"));
 const Privacy = lazy(() => import("./pages/Privacy"));
 const Terms = lazy(() => import("./pages/Terms"));
 const TermsAndConditions = lazy(() => import("./pages/TermsAndConditions"));
+const PhotoSelection = lazy(() => import("./pages/PhotoSelection"));
 
 // Admin pages
 const Login = lazy(() => import("./pages/admin/Login"));
@@ -50,6 +51,8 @@ export default function App() {
               <Route path="/privacy" element={<Privacy />} />
               <Route path="/terms" element={<Terms />} />
               <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
+              {/* Opened from the e-mail link; the token in the path is the key. */}
+              <Route path="/pilih/:token" element={<PhotoSelection />} />
             </Route>
 
             {/* Admin */}

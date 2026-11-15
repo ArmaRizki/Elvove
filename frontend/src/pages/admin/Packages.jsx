@@ -21,7 +21,14 @@ export default function Packages() {
   const [loading, setLoading] = useState(true);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [form, setForm] = useState({ title: "", price: "", featuresText: "", displayOrder: 0, highlighted: false });
+  const [form, setForm] = useState({
+    title: "",
+    price: "",
+    featuresText: "",
+    displayOrder: 0,
+    highlighted: false,
+    photoSelectionLimit: 0,
+  });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
@@ -37,7 +44,14 @@ export default function Packages() {
 
   const openCreate = () => {
     setEditing(null);
-    setForm({ title: "", price: "", featuresText: "", displayOrder: 0, highlighted: false });
+    setForm({
+      title: "",
+      price: "",
+      featuresText: "",
+      displayOrder: 0,
+      highlighted: false,
+      photoSelectionLimit: 0,
+    });
     setError("");
     setModalOpen(true);
   };
@@ -50,6 +64,7 @@ export default function Packages() {
       featuresText: (item.features || []).join("\n"),
       displayOrder: item.displayOrder,
       highlighted: item.highlighted,
+      photoSelectionLimit: item.photoSelectionLimit || 0,
     });
     setError("");
     setModalOpen(true);
@@ -65,6 +80,7 @@ export default function Packages() {
       features: form.featuresText.split("\n").map((f) => f.trim()).filter(Boolean),
       displayOrder: Number(form.displayOrder) || 0,
       highlighted: form.highlighted,
+      photoSelectionLimit: Number(form.photoSelectionLimit) || 0,
     };
     try {
       if (editing) await adminApi.updatePackage(editing.id, payload);
@@ -108,6 +124,7 @@ export default function Packages() {
                 <tr className="border-b border-gray-200 text-left text-gray-700">
                   <th className="px-4 py-3 font-normal">Judul</th>
                   <th className="px-4 py-3 font-normal">Harga</th>
+                  <th className="px-4 py-3 font-normal">Foto dipilih</th>
                   <th className="px-4 py-3 font-normal">Unggulan</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -117,6 +134,9 @@ export default function Packages() {
                   <tr key={item.id} className="border-b border-gray-200 last:border-0">
                     <td className="px-4 py-3 text-gray-700">{item.title}</td>
                     <td className="px-4 py-3 text-gray-700">{formatPrice(item.price)}</td>
+                    <td className="px-4 py-3 text-gray-700">
+                      {item.photoSelectionLimit > 0 ? `${item.photoSelectionLimit} foto` : "—"}
+                    </td>
                     <td className="px-4 py-3 text-gray-700">{item.highlighted ? "Ya" : "—"}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button
@@ -146,6 +166,9 @@ export default function Packages() {
                 <div className="min-w-0">
                   <p className="break-words font-medium text-gray-900">{item.title}</p>
                   <p className="text-sm text-gray-700">{formatPrice(item.price)}</p>
+                  {item.photoSelectionLimit > 0 && (
+                    <p className="text-xs text-gray-600">Termasuk pilih {item.photoSelectionLimit} foto</p>
+                  )}
                   {item.highlighted && (
                     <p className="mt-1 text-xs text-[#E11D48]">Paling Banyak Dipesan</p>
                   )}
@@ -215,6 +238,24 @@ export default function Packages() {
                   required
                   className={adminInput}
                 />
+              </div>
+              <div>
+                <label className={adminLabel} htmlFor="package-photo-limit">
+                  JUMLAH FOTO YANG DAPAT DIPILIH KLIEN
+                </label>
+                <input
+                  id="package-photo-limit"
+                  type="number"
+                  min="0"
+                  max="1000"
+                  value={form.photoSelectionLimit}
+                  onChange={(e) => setForm({ ...form, photoSelectionLimit: e.target.value })}
+                  className={adminInput}
+                />
+                <p className="mt-1 text-xs text-gray-500">
+                  Batas foto yang boleh dipilih klien di halaman pilihan foto, misalnya 10 untuk
+                  paket Origin atau 30 untuk Ascend. Isi 0 bila paket tidak termasuk pemilihan foto.
+                </p>
               </div>
               <div>
                 <label className={adminLabel} htmlFor="package-features">FITUR (SATU PER BARIS)</label>

@@ -12,6 +12,7 @@ import { adminApi } from "../../services/adminApi";
 import CustomDatePicker from "../CustomDatePicker";
 import CustomTimePicker from "../CustomTimePicker";
 import BookingPayment from "./BookingPayment";
+import BookingSelection from "./BookingSelection";
 import { formatDate } from "./adminFormat";
 import { pad } from "../../utils/bookingTime";
 import { adminLabel, adminInput, adminSecondaryButton } from "./adminStyles";
@@ -465,6 +466,18 @@ export default function BookingCalendar() {
                   <Mail size={15} /> Kirim Email Konfirmasi
                 </button>
               )}
+              <div className="border-t border-gray-200 pt-3">
+                <BookingSelection
+                  key={`selection-${selected.id}`}
+                  booking={selected}
+                  onUpdated={(update) => {
+                    if (!update) return;
+                    setSelected((current) => (current ? { ...current, ...update } : current));
+                    load();
+                  }}
+                />
+              </div>
+
               <div className="border-t border-gray-200 pt-3">
                 <BookingPayment
                   key={`payment-${selected.id}`}

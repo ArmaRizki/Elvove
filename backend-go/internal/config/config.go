@@ -28,6 +28,22 @@ type Config struct {
 	AdminUsername string
 	AdminEmail    string
 	AdminPassword string
+	// GoogleDrive holds the OAuth credentials that let the client photo
+	// selection page read the raw folders and write the WebP previews. Empty
+	// means the feature is off and the page reports that instead of failing.
+	GoogleDrive DriveConfig
+}
+
+// DriveConfig is the OAuth client plus the refresh token of the Google account
+// that owns the photo folders. The three endpoint fields exist so a test can
+// point the client at a stub; empty means the real Google addresses.
+type DriveConfig struct {
+	ClientID     string
+	ClientSecret string
+	RefreshToken string
+	TokenURL     string
+	APIBase      string
+	UploadBase   string
 }
 
 func Load() (Config, error) {
@@ -67,9 +83,17 @@ func Load() (Config, error) {
 		SMTPEncryptionKey: []byte(smtpKey),
 		SiteURL:           strings.TrimRight(strings.TrimSpace(env("MAIL_SITE_URL", "https://elvove.site")), "/"),
 		MailAdminURL:      strings.TrimSpace(env("MAIL_ADMIN_URL", "https://elvove.site")),
-		AdminUsername:     os.Getenv("ADMIN_USERNAME"),
-		AdminEmail:        os.Getenv("ADMIN_EMAIL"),
-		AdminPassword:     os.Getenv("ADMIN_PASSWORD"),
+		GoogleDrive: DriveConfig{
+			ClientID:     strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_ID")),
+			ClientSecret: strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_CLIENT_SECRET")),
+			RefreshToken: strings.TrimSpace(os.Getenv("GOOGLE_OAUTH_REFRESH_TOKEN")),
+			TokenURL:     strings.TrimSpace(os.Getenv("DRIVE_TOKEN_URL")),
+			APIBase:      strings.TrimSpace(os.Getenv("DRIVE_API_BASE")),
+			UploadBase:   strings.TrimSpace(os.Getenv("DRIVE_UPLOAD_BASE")),
+		},
+		AdminUsername: os.Getenv("ADMIN_USERNAME"),
+		AdminEmail:    os.Getenv("ADMIN_EMAIL"),
+		AdminPassword: os.Getenv("ADMIN_PASSWORD"),
 	}, nil
 }
 

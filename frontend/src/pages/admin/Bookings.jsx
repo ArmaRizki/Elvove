@@ -8,6 +8,7 @@ import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import BookingDetails from "../../components/admin/BookingDetails";
 import BookingConfirmationEmail from "../../components/admin/BookingConfirmationEmail";
 import BookingPayment from "../../components/admin/BookingPayment";
+import BookingSelection from "../../components/admin/BookingSelection";
 import {
   adminLabel,
   adminTableWide,
@@ -432,6 +433,12 @@ export default function Bookings() {
                     )
                   );
                 }}
+              />
+
+              <BookingSelection
+                key={`selection-${selected.id}`}
+                booking={selected}
+                onUpdated={applyBookingUpdate}
               />
 
               <BookingPayment

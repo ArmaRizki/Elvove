@@ -49,6 +49,8 @@ export const adminApi = {
     api.patch(`/api/admin/bookings/${id}/payment`, { paymentStatus }),
   updateBookingDelivery: (id, deliveryUrl) =>
     api.patch(`/api/admin/bookings/${id}/delivery`, { deliveryUrl }),
+  updateBookingRawFolder: (id, rawFolderUrl) =>
+    api.patch(`/api/admin/bookings/${id}/raw-folder`, { rawFolderUrl }),
   rescheduleBooking: (id, data) => api.patch(`/api/admin/bookings/${id}/reschedule`, data),
   deleteBooking: (id) => api.delete(`/api/admin/bookings/${id}`),
 
