@@ -3,7 +3,7 @@ import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import RichTextEditor from "../../components/admin/RichTextEditor";
-import { toHtml, isEmptyHtml } from "../../utils/richText";
+import { toHtml } from "../../utils/richText";
 import {
   adminCard,
   adminInput,
@@ -49,7 +49,8 @@ export default function TermsEditor() {
   }
 
   async function handleSave() {
-    if (!form.title.trim() || isEmptyHtml(form.content)) {
+    // The editor leaves "<p></p>" behind, so strip tags and &nbsp; first.
+    if (!form.title.trim() || !form.content.replace(/<[^>]*>|&nbsp;/g, "").trim()) {
       setNotice({ type: "error", text: "Judul dan isi wajib diisi." });
       return;
     }

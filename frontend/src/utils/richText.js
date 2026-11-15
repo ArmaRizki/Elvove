@@ -139,9 +139,3 @@ export function splitHtmlSections(html) {
 
   return sections;
 }
-
-// True when the HTML holds no visible text, such as the editor's empty "<p></p>".
-export function isEmptyHtml(html) {
-  const body = new DOMParser().parseFromString(String(html || ""), "text/html").body;
-  return (body.textContent || "").trim() === "";
-}

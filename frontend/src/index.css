@@ -88,9 +88,24 @@ body {
  * input keeps its native behaviour: keyboard editing and the value (always
  * YYYY-MM-DD) are untouched. The calendar button is drawn by us (see
  * .field-icon-button) so it matches the time picker's clock icon.
+ *
+ * The transparent colour is set on the input itself, not only on
+ * ::-webkit-datetime-edit: some Android browsers ignore that pseudo-element's
+ * colour and showed both texts on top of each other. On focus the native text
+ * returns so typing stays visible. Browsers without the pseudo-element
+ * (Firefox) are left untouched, because their overlay is hidden below.
  */
-.date-input::-webkit-datetime-edit {
-  color: transparent;
+@supports selector(::-webkit-datetime-edit) {
+  .form-field.date-input {
+    color: transparent;
+    /* Some Android browsers only honour this one for form-control text. */
+    -webkit-text-fill-color: transparent;
+  }
+
+  .form-field.date-input:focus {
+    color: #111827;
+    -webkit-text-fill-color: #111827;
+  }
 }
 
 .date-input::-webkit-calendar-picker-indicator {
@@ -115,11 +130,7 @@ body {
   color: #111827; /* sama dengan text-gray-900 */
 }
 
-/* Saat fokus, teks asli ditampilkan lagi supaya pengetikan terlihat. */
-.date-input:focus::-webkit-datetime-edit {
-  color: #111827;
-}
-
+/* Saat fokus, overlay disembunyikan dan teks asli yang tampil. */
 .date-input:focus + .date-input-overlay {
   opacity: 0;
 }
