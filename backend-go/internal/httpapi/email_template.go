@@ -31,6 +31,8 @@ const (
 	emailInfoBg   = "#F4F1F8"
 	emailBorder   = "#EEEAF2"
 	emailBadgeBg  = "#FCEEF1"
+	// The same green as the floating WhatsApp button on the site.
+	emailWhatsAppGreen = "#25D366"
 
 	emailBrandFallback = "Elvove"
 	emailTagline       = "Capturing Moments, Creating Memories."
@@ -521,13 +523,13 @@ func emailWhatsAppButton(number, siteURL string) string {
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td align=\"center\" style=\"padding:26px 0 0 0;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">" +
-		"<tr><td align=\"center\" bgcolor=\"" + emailDark + "\" style=\"background:" + emailDark +
-		";border-radius:5px;\">" +
+		"<tr><td align=\"center\" bgcolor=\"" + emailWhatsAppGreen + "\" style=\"background:" +
+		emailWhatsAppGreen + ";border-radius:5px;\">" +
 		"<!--[if mso]>" +
 		"<v:roundrect xmlns:v=\"urn:schemas-microsoft-com:vml\" " +
 		"xmlns:w=\"urn:schemas-microsoft-com:office:word\" href=\"" + href + "\" " +
 		"style=\"height:46px;v-text-anchor:middle;width:230px;\" arcsize=\"10%\" stroke=\"f\" " +
-		"fillcolor=\"" + emailDark + "\">" +
+		"fillcolor=\"" + emailWhatsAppGreen + "\">" +
 		"<w:anchorlock/>" +
 		"<center style=\"color:#ffffff;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;" +
 		"letter-spacing:1px;\">CHAT VIA WHATSAPP</center>" +
