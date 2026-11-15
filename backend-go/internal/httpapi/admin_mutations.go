@@ -863,7 +863,7 @@ func (s *Server) sendBookingConfirmation(w http.ResponseWriter, r *http.Request)
 		EventLocation: nullableDeref(booking.EventLocation),
 		PackageTitle:  booking.PackageTitle,
 		PackagePrice:  booking.PackagePrice,
-	}, s.mailSenderName(r), s.mailSenderEmail(r), s.Config.SiteURL)
+	}, s.mailSenderName(r), s.contactWhatsApp(r), s.Config.SiteURL)
 	if e = s.sendSMTPMessage(r, booking.Email, subject, htmlBody, textBody); e != nil {
 		writeError(w, 400, "Email konfirmasi gagal dikirim. Periksa konfigurasi pada Pengaturan Email, lalu coba lagi.")
 		return
@@ -883,10 +883,9 @@ func nullableDeref(value *string) string {
 	return *value
 }
 
-// mailSenderName and mailSenderEmail read the configured sender identity used
-// in the From header and in the e-mail templates, mirroring Java's
-// SmtpMailService.getSenderName()/getSenderEmail(). They fall back to the
-// brand name when SMTP is not configured yet, so a template still renders.
+// mailSenderName reads the configured sender name used in the e-mail
+// templates, mirroring Java's SmtpMailService.getSenderName(). It falls back to
+// the brand name when SMTP is not configured yet, so a template still renders.
 func (s *Server) mailSenderName(r *http.Request) string {
 	settings, err := s.loadSMTP(r)
 	if err != nil || strings.TrimSpace(settings.SenderName) == "" {
@@ -895,12 +894,15 @@ func (s *Server) mailSenderName(r *http.Request) string {
 	return settings.SenderName
 }
 
-func (s *Server) mailSenderEmail(r *http.Request) string {
-	settings, err := s.loadSMTP(r)
-	if err != nil {
+// contactWhatsApp reads the number from the site's contact settings, the one
+// the public WhatsApp button uses. Empty when it has not been filled in.
+func (s *Server) contactWhatsApp(r *http.Request) string {
+	var number string
+	if err := s.Store.Pool.QueryRow(r.Context(), `SELECT COALESCE(whatsapp_number,'') FROM contact_info ORDER BY id LIMIT 1`).Scan(&number); err != nil {
+		log.Printf("whatsapp number unavailable for e-mail: %v", err)
 		return ""
 	}
-	return strings.TrimSpace(settings.SenderEmail)
+	return strings.TrimSpace(number)
 }
 func (s *Server) notifyBookingAdmins(r *http.Request, id int64) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
@@ -1547,7 +1549,7 @@ func (s *Server) rescheduleBooking(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "Booking could not be rescheduled.")
 		return
 	}
-	subject, htmlBody, textBody := renderBookingReschedule(b, s.mailSenderName(r), s.mailSenderEmail(r), s.Config.SiteURL)
+	subject, htmlBody, textBody := renderBookingReschedule(b, s.mailSenderName(r), s.contactWhatsApp(r), s.Config.SiteURL)
 	if mailErr := s.sendSMTPMessage(r, b.Email, subject, htmlBody, textBody); mailErr != nil {
 		// Returning without Commit rolls the schedule change back, exactly
 		// like Java's BadRequestException inside the transaction.

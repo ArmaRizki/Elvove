@@ -88,6 +88,9 @@ terms-and-conditions.
   (`confirmation_email_sent_at`, `confirmation_email_count`) and written only
   after SMTP accepts the message, so a failure leaves the row retryable.
 - Rescheduling stores the new date/time and sends a notification to the client.
+- Both customer e-mails end with a WhatsApp button pointing at the number in
+  the site's contact settings (the same one the floating button uses), so a
+  reply goes to one chat instead of an inbox nobody watches.
 - New bookings notify the configured administrators, after the transaction
   commits, without delaying the customer or rolling back the booking. A failed
   send is retried three times, and the outcome (sent count, skip or failure) is

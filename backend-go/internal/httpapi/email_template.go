@@ -39,6 +39,7 @@ const (
 )
 
 var emailLineBreaks = regexp.MustCompile(`[\r\n\t]+`)
+var emailNonDigits = regexp.MustCompile(`\D`)
 
 var emailMonths = []string{
 	"Januari", "Februari", "Maret", "April", "Mei", "Juni",
@@ -62,10 +63,9 @@ type bookingEmail struct {
 // renderBookingConfirmation returns the subject, HTML body and plain-text body
 // of the booking confirmation, matching the Java template byte for byte in
 // wording and layout.
-func renderBookingConfirmation(b bookingEmail, senderName, senderEmail, siteURL string) (string, string, string) {
+func renderBookingConfirmation(b bookingEmail, senderName, whatsapp, siteURL string) (string, string, string) {
 	siteURL = emailSiteURL(siteURL)
 	brand := emailBrandName(senderName)
-	contact := emailContactEmail(senderEmail)
 	customer := emailOneLine(b.Name)
 
 	body := emailBadge("PESANAN DITERIMA") +
@@ -79,7 +79,7 @@ func renderBookingConfirmation(b bookingEmail, senderName, senderEmail, siteURL 
 		emailDetailsCard(b) +
 		emailPaymentBlock(b, siteURL) +
 		emailNextStepsBlock() +
-		emailContactButton(contact, siteURL)
+		emailWhatsAppButton(whatsapp, siteURL)
 
 	var text strings.Builder
 	text.WriteString("PESANAN DITERIMA\n\n")
@@ -94,6 +94,9 @@ func renderBookingConfirmation(b bookingEmail, senderName, senderEmail, siteURL 
 	text.WriteString("\n" + emailPaymentLines(b.PackagePrice, siteURL))
 	text.WriteString("\nLANGKAH SELANJUTNYA\n")
 	text.WriteString(emailStepsText())
+	if url := emailWhatsAppURL(whatsapp); url != "" {
+		text.WriteString("\nWhatsApp: " + url + "\n")
+	}
 	text.WriteString("\nElvove\n")
 	text.WriteString(emailTagline + "\n")
 	text.WriteString("© " + strconv.Itoa(time.Now().Year()) + " " + brand + ". All rights reserved.\n")
@@ -106,10 +109,9 @@ func renderBookingConfirmation(b bookingEmail, senderName, senderEmail, siteURL 
 
 // renderBookingReschedule is the schedule-change notice. It shares the
 // confirmation layout so the customer always sees one consistent design.
-func renderBookingReschedule(b bookingEmail, senderName, senderEmail, siteURL string) (string, string, string) {
+func renderBookingReschedule(b bookingEmail, senderName, whatsapp, siteURL string) (string, string, string) {
 	siteURL = emailSiteURL(siteURL)
 	brand := emailBrandName(senderName)
-	contact := emailContactEmail(senderEmail)
 	customer := emailOneLine(b.Name)
 
 	body := emailBadge("PERUBAHAN JADWAL") +
@@ -119,10 +121,10 @@ func renderBookingReschedule(b bookingEmail, senderName, senderEmail, siteURL st
 		emailGreetingBlock(
 			"Halo, "+customer+".",
 			"Terima kasih telah memilih "+brand+". Kami ingin segera menginformasikan usulan perubahan "+
-				"jadwal sesi foto Anda. Mohon balas email ini untuk mengonfirmasi atau berdiskusi.") +
+				"jadwal sesi foto Anda. Hubungi kami via WhatsApp untuk mengonfirmasi atau berdiskusi.") +
 		emailDetailsCard(b) +
 		emailNextStepsBlock() +
-		emailContactButton(contact, siteURL)
+		emailWhatsAppButton(whatsapp, siteURL)
 
 	var text strings.Builder
 	text.WriteString("PERUBAHAN JADWAL\n\n")
@@ -131,11 +133,14 @@ func renderBookingReschedule(b bookingEmail, senderName, senderEmail, siteURL st
 	text.WriteString("Halo, " + customer + ".\n\n")
 	text.WriteString("Terima kasih telah memilih " + brand + ". ")
 	text.WriteString("Kami ingin segera menginformasikan usulan perubahan jadwal sesi foto Anda. ")
-	text.WriteString("Mohon balas email ini untuk mengonfirmasi atau berdiskusi.\n\n")
+	text.WriteString("Mohon hubungi kami via WhatsApp untuk mengonfirmasi atau berdiskusi.\n\n")
 	text.WriteString("DETAIL BOOKING\n")
 	text.WriteString(emailDetailLines(b))
 	text.WriteString("\nLANGKAH SELANJUTNYA\n")
 	text.WriteString(emailStepsText())
+	if url := emailWhatsAppURL(whatsapp); url != "" {
+		text.WriteString("\nWhatsApp: " + url + "\n")
+	}
 	text.WriteString("\nElvove\n")
 	text.WriteString(emailTagline + "\n")
 	text.WriteString("© " + strconv.Itoa(time.Now().Year()) + " " + brand + ". All rights reserved.\n")
@@ -482,7 +487,7 @@ func emailNextStepsBlock() string {
 		"</td></tr>" +
 		emailStepRow("Bayar DP 50% lewat transfer BCA atau QRIS.") +
 		emailStepRow("Datang tepat waktu di lokasi yang disepakati.") +
-		emailStepRow("Perlu ubah jadwal atau ada pertanyaan? Balas email ini.") +
+		emailStepRow("Perlu ubah jadwal atau ada pertanyaan? Hubungi kami via WhatsApp.") +
 		"</table>" +
 		"</td>" +
 		"</tr>" +
@@ -502,14 +507,13 @@ func emailStepRow(step string) string {
 		"</tr>"
 }
 
-// Reply button. The address is the one the application already uses.
-func emailContactButton(contact, siteURL string) string {
-	// The sender address is configured in the application and is never
-	// hardcoded here. If it is ever missing, the button points at the site
-	// rather than at a broken "mailto:" with no address.
-	href := emailEscape(siteURL)
-	if contact != "" {
-		href = "mailto:" + emailEscape(contact)
+// WhatsApp button. The number is the one in the site's contact settings, so the
+// button opens the same chat as the floating button on the site. When it is
+// unset the button points at the site rather than at a dead wa.me link.
+func emailWhatsAppButton(number, siteURL string) string {
+	href := emailWhatsAppURL(number)
+	if href == "" {
+		href = emailEscape(siteURL)
 	}
 	return "<table role=\"presentation\" width=\"100%\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\" " +
 		"style=\"width:100%;border-collapse:collapse;\">" +
@@ -524,16 +528,29 @@ func emailContactButton(contact, siteURL string) string {
 		"fillcolor=\"" + emailDark + "\">" +
 		"<w:anchorlock/>" +
 		"<center style=\"color:#ffffff;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;" +
-		"letter-spacing:1px;\">BALAS EMAIL KAMI</center>" +
+		"letter-spacing:1px;\">CHAT VIA WHATSAPP</center>" +
 		"</v:roundrect>" +
 		"<![endif]-->" +
 		"<!--[if !mso]><!-- -->" +
 		"<a href=\"" + href + "\" style=\"display:inline-block;padding:13px 24px;" +
 		"font-family:" + emailFont + ";font-size:12px;line-height:20px;font-weight:700;letter-spacing:1.2px;" +
-		"color:#FFFFFF;text-decoration:none;\">BALAS EMAIL KAMI</a>" +
+		"color:#FFFFFF;text-decoration:none;\">CHAT VIA WHATSAPP</a>" +
 		"<!--<![endif]-->" +
 		"</td></tr></table>" +
 		"</td></tr></table>"
+}
+
+// emailWhatsAppURL turns the stored number into a wa.me link, applying the same
+// rule as the site: keep the digits and turn a leading 0 into 62.
+func emailWhatsAppURL(number string) string {
+	digits := emailNonDigits.ReplaceAllString(emailOneLine(number), "")
+	if digits == "" {
+		return ""
+	}
+	if strings.HasPrefix(digits, "0") {
+		digits = "62" + digits[1:]
+	}
+	return "https://wa.me/" + digits
 }
 
 // Minimalist centred footer.
@@ -593,7 +610,7 @@ func emailStatusLabel(status string) string {
 func emailStepsText() string {
 	return "• Bayar DP 50% lewat transfer BCA atau QRIS.\n" +
 		"• Datang tepat waktu di lokasi yang disepakati.\n" +
-		"• Perlu ubah jadwal atau ada pertanyaan? Balas email ini.\n"
+		"• Perlu ubah jadwal atau ada pertanyaan? Hubungi kami via WhatsApp.\n"
 }
 
 // emailPaymentLines is the plain-text twin of emailPaymentBlock.
@@ -620,10 +637,6 @@ func emailBrandName(senderName string) string {
 		return emailBrandFallback
 	}
 	return name
-}
-
-func emailContactEmail(senderEmail string) string {
-	return emailOneLine(senderEmail)
 }
 
 // emailTanggal renders a booking date as an Indonesian long date, for example
@@ -758,5 +771,5 @@ func PreviewConfirmation() (string, string, string) {
 		EventLocation: "Jakarta Selatan",
 		PackageTitle:  "Premium",
 		PackagePrice:  "2000000.00",
-	}, "Elvove", "elvo.vee@gmail.com", "https://elvove.site")
+	}, "Elvove", "081234567890", "https://elvove.site")
 }

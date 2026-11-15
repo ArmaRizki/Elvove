@@ -17,7 +17,7 @@ func sampleBooking() bookingEmail {
 }
 
 func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
-	subject, html, text := renderBookingConfirmation(sampleBooking(), "Elvove", "elvo.vee@gmail.com", "https://elvove.site")
+	subject, html, text := renderBookingConfirmation(sampleBooking(), "Elvove", "081234567890", "https://elvove.site")
 
 	if subject != "Booking Anda Telah Dikonfirmasi — Elvove" {
 		t.Errorf("subject = %q", subject)
@@ -45,8 +45,8 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 		`Booking Anda Telah Dikonfirmasi`,
 		`DETAIL BOOKING`,
 		`LANGKAH SELANJUTNYA`,
-		`BALAS EMAIL KAMI`,
-		`mailto:elvo.vee@gmail.com`,
+		`CHAT VIA WHATSAPP`,
+		`https://wa.me/6281234567890`,
 		`Capturing Moments, Creating Memories.`,
 	} {
 		if !strings.Contains(html, marker) {
@@ -101,6 +101,7 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 		"Atas Nama       : Leonardus Seco Patu Sila Anggara",
 		"QRIS            : https://elvove.site/qris.png",
 		"LANGKAH SELANJUTNYA",
+		"WhatsApp: https://wa.me/6281234567890",
 	} {
 		if !strings.Contains(text, marker) {
 			t.Errorf("text missing marker %q", marker)
@@ -140,13 +141,13 @@ func TestRenderBookingConfirmationUsesBrandFallbacks(t *testing.T) {
 	if subject != "Booking Anda Telah Dikonfirmasi — Elvove" {
 		t.Errorf("subject = %q", subject)
 	}
-	// No sender address: the reply button falls back to the site URL instead
-	// of a broken "mailto:" with no address.
-	if strings.Contains(html, "mailto:") {
-		t.Error("html should not build a mailto: link without a sender address")
+	// No WhatsApp number: the button falls back to the site URL instead of a
+	// dead wa.me link with no number.
+	if strings.Contains(html, "wa.me") {
+		t.Error("html should not build a wa.me link without a WhatsApp number")
 	}
 	if !strings.Contains(html, `href="https://elvove.site"`) {
-		t.Error("html should fall back to the site URL for the reply button")
+		t.Error("html should fall back to the site URL for the WhatsApp button")
 	}
 	if !strings.Contains(text, "Terima kasih telah memilih Elvove.") {
 		t.Error("text should fall back to the brand name")
@@ -241,8 +242,23 @@ func TestMimeWordEncodesNonASCIISubject(t *testing.T) {
 	}
 }
 
+func TestEmailWhatsAppURLNormalisesTheStoredNumber(t *testing.T) {
+	cases := map[string]string{
+		"081234567890":     "https://wa.me/6281234567890",
+		"+62 812-3456-789": "https://wa.me/628123456789",
+		"6281234567890":    "https://wa.me/6281234567890",
+		"":                 "",
+		"   ":              "",
+	}
+	for number, want := range cases {
+		if got := emailWhatsAppURL(number); got != want {
+			t.Errorf("emailWhatsAppURL(%q) = %q, want %q", number, got, want)
+		}
+	}
+}
+
 func TestRenderBookingRescheduleMatchesJavaLayout(t *testing.T) {
-	subject, html, text := renderBookingReschedule(sampleBooking(), "Elvove", "elvo.vee@gmail.com", "https://elvove.site")
+	subject, html, text := renderBookingReschedule(sampleBooking(), "Elvove", "081234567890", "https://elvove.site")
 
 	if subject != "Jadwal Sesi Foto Diperbarui — Elvove" {
 		t.Errorf("subject = %q", subject)
@@ -253,7 +269,7 @@ func TestRenderBookingRescheduleMatchesJavaLayout(t *testing.T) {
 		`Berikut jadwal baru yang kami usulkan untuk sesi foto Anda.`,
 		`DETAIL BOOKING`,
 		`LANGKAH SELANJUTNYA`,
-		`mailto:elvo.vee@gmail.com`,
+		`https://wa.me/6281234567890`,
 		`Rp2.000.000`,
 	} {
 		if !strings.Contains(html, marker) {

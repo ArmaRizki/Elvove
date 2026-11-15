@@ -13,7 +13,7 @@ import (
 // blocks remote images until the reader allows them, and a blocked QR code is
 // a confirmation the customer cannot pay from.
 func TestMessageEmbedsImagesInline(t *testing.T) {
-	subject, htmlBody, textBody := renderBookingConfirmation(sampleBooking(), "Elvove", "elvo.vee@gmail.com", "https://elvove.site")
+	subject, htmlBody, textBody := renderBookingConfirmation(sampleBooking(), "Elvove", "081234567890", "https://elvove.site")
 	message := buildMIMEMessage("Elvove <elvo.vee@gmail.com>", "budi@example.com", "elvo.vee@gmail.com",
 		subject, htmlBody, textBody)
 
@@ -86,7 +86,7 @@ func TestMessageEmbedsImagesInline(t *testing.T) {
 
 // A message that only shows the logo must not drag the QR code along.
 func TestOnlyReferencedImagesAreAttached(t *testing.T) {
-	subject, htmlBody, textBody := renderBookingReschedule(sampleBooking(), "Elvove", "elvo.vee@gmail.com", "https://elvove.site")
+	subject, htmlBody, textBody := renderBookingReschedule(sampleBooking(), "Elvove", "081234567890", "https://elvove.site")
 	message := buildMIMEMessage("Elvove <elvo.vee@gmail.com>", "budi@example.com", "elvo.vee@gmail.com",
 		subject, htmlBody, textBody)
 	if !strings.Contains(message, "Content-ID: <"+emailLogoCID+">") {
