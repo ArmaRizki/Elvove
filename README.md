@@ -93,9 +93,10 @@ terms-and-conditions.
   send is retried three times, and the outcome (sent count, skip or failure) is
   logged with the booking id.
 - Admin calendar view and a custom time picker for schedule changes.
-- The public booking form uses its own date and time pickers (not the native
-  controls), so the date always reads `dd/mm/yyyy` whatever the browser locale
-  is. They still hand the API a `YYYY-MM-DD` date and an `HH:mm` time.
+- The booking form and the admin reschedule panel use their own date and time
+  pickers (not the native controls), so a date always reads `dd/mm/yyyy`
+  whatever the browser locale is. They still hand the API a `YYYY-MM-DD` date
+  and an `HH:mm` time.
 
 ### Terms & Conditions
 

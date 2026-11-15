@@ -1,5 +1,6 @@
 // Indonesian labels and formatters shared by the admin panel, so statuses,
 // dates and prices read the same way everywhere.
+import { formatDateDisplay } from "../../utils/bookingTime";
 
 export const STATUS_LABELS = {
   PENDING: "Menunggu",
@@ -30,37 +31,21 @@ export function statusBadge(status) {
   return STATUS_BADGES[status] || STATUS_BADGES.PENDING;
 }
 
-const MONTHS = [
-  "Januari",
-  "Februari",
-  "Maret",
-  "April",
-  "Mei",
-  "Juni",
-  "Juli",
-  "Agustus",
-  "September",
-  "Oktober",
-  "November",
-  "Desember",
-];
-
-/** "2026-11-10" → "10 November 2026". Returns null when there is no date. */
+/**
+ * "2026-11-10" or "2026-11-10T09:00:00" → "10/11/2026", the same dd/mm/yyyy
+ * the booking form shows. Returns null when there is no date.
+ */
 export function formatDate(value) {
-  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(String(value || ""));
-  if (!match) return null;
-  const month = MONTHS[Number(match[2]) - 1];
-  if (!month) return null;
-  return `${Number(match[3])} ${month} ${match[1]}`;
+  return formatDateDisplay(String(value || "").slice(0, 10)) || null;
 }
 
-/** "09:00:00" → "09.00". Returns null when there is no time. */
+/** "09:00:00" → "09:00". Returns null when there is no time. */
 export function formatTime(value) {
   const match = /^(\d{2}):(\d{2})/.exec(String(value || ""));
-  return match ? `${match[1]}.${match[2]}` : null;
+  return match ? `${match[1]}:${match[2]}` : null;
 }
 
-/** "2026-11-08T12:34:56" → "8 November 2026, 12.34". */
+/** "2026-11-08T12:34:56" → "08/11/2026, 12:34". */
 export function formatDateTime(value) {
   const date = formatDate(value);
   if (!date) return null;

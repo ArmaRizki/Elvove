@@ -9,6 +9,9 @@ import {
   Phone,
 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
+import CustomDatePicker from "../CustomDatePicker";
+import CustomTimePicker from "../CustomTimePicker";
+import { formatDate } from "./adminFormat";
 import { adminLabel, adminInput, adminSecondaryButton } from "./adminStyles";
 
 const pad = (n) => String(n).padStart(2, "0");
@@ -30,17 +33,6 @@ const sameMonth = (a, b) =>
   a.getMonth() === b.getMonth() && a.getFullYear() === b.getFullYear();
 const monthLabel = (date) =>
   date.toLocaleDateString("id-ID", { month: "long", year: "numeric" });
-const dayLabel = (date) =>
-  date.toLocaleDateString("id-ID", {
-    weekday: "long",
-    month: "long",
-    day: "numeric",
-    year: "numeric",
-  });
-const shortDay = (date) =>
-  date.toLocaleDateString("id-ID", { weekday: "short", month: "short", day: "numeric" });
-const rangeLabel = (start, end) =>
-  `${shortDay(start)} – ${shortDay(end)}, ${end.getFullYear()}`;
 
 const WEEKDAYS = ["Min", "Sen", "Sel", "Rab", "Kam", "Jum", "Sab"];
 const VIEWS = [
@@ -108,12 +100,13 @@ export default function BookingCalendar() {
     return Array.from({ length: count }, (_, index) => addDays(start, index));
   }, [cursor, view]);
 
+  // Week and day views print dd/mm/yyyy like every other date in the app.
   const headerLabel =
     view === "month"
       ? monthLabel(cursor)
       : view === "week"
-        ? rangeLabel(days[0], days[days.length - 1])
-        : dayLabel(cursor);
+        ? `${formatDate(keyOf(days[0]))} – ${formatDate(keyOf(days[days.length - 1]))}`
+        : formatDate(keyOf(cursor));
 
   const openBooking = (booking) => {
     setSelected(booking);
@@ -144,7 +137,7 @@ export default function BookingCalendar() {
     }
     if (
       !window.confirm(
-        `Ubah jadwal pemesanan ${selected.name} menjadi ${newDate} pukul ${newTime}?`
+        `Ubah jadwal pemesanan ${selected.name} menjadi ${formatDate(newDate)} pukul ${newTime}?`
       )
     ) {
       return;
@@ -407,7 +400,7 @@ export default function BookingCalendar() {
               <p className="flex items-center gap-2"><MapPin size={15} /> {selected.eventLocation || "-"}</p>
               <p className="text-gray-600">Paket: {selected.packageTitle || "-"}</p>
               <p className="text-gray-600">
-                Jadwal saat ini: {selected.eventDate} · {timeOf(selected.eventTime)}
+                Jadwal saat ini: {formatDate(selected.eventDate) || "-"} · {timeOf(selected.eventTime)}
               </p>
             </div>
 
@@ -416,24 +409,30 @@ export default function BookingCalendar() {
                 <CalendarClock size={16} /> Ubah jadwal
               </h3>
               <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                <label className={adminLabel}>
-                  Tanggal baru
-                  <input
-                    type="date"
+                <div className="min-w-0">
+                  <label htmlFor="reschedule-date" className={adminLabel}>
+                    Tanggal baru
+                  </label>
+                  <CustomDatePicker
+                    id="reschedule-date"
                     value={newDate}
-                    onChange={(event) => setNewDate(event.target.value)}
-                    className={adminInput}
+                    onChange={setNewDate}
+                    label="Tanggal baru"
+                    className={`${adminInput} form-field--icon flex items-center`}
                   />
-                </label>
-                <label className={adminLabel}>
-                  Waktu baru
-                  <input
-                    type="time"
+                </div>
+                <div className="min-w-0">
+                  <label htmlFor="reschedule-time" className={adminLabel}>
+                    Waktu baru
+                  </label>
+                  <CustomTimePicker
+                    id="reschedule-time"
                     value={newTime}
-                    onChange={(event) => setNewTime(event.target.value)}
-                    className={adminInput}
+                    onChange={setNewTime}
+                    label="Waktu baru"
+                    className={`${adminInput} form-field--icon flex items-center`}
                   />
-                </label>
+                </div>
               </div>
               <button
                 type="button"
