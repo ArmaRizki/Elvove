@@ -203,12 +203,17 @@ func (s *Server) getContact(w http.ResponseWriter, r *http.Request) {
 	s.rowOrError(w, row, err, map[string]any{"id": nil, "phone": nil, "email": nil, "address": nil, "googleMapLink": nil, "whatsappNumber": nil})
 }
 
+const termsColumns = `SELECT id, title, introduction, content, version, layout_columns AS "layoutColumns", layout_width AS "layoutWidth", layout_split AS "layoutSplit", updated_at AS "updatedAt" FROM site_terms ORDER BY id LIMIT 1`
+
 func (s *Server) getTerms(w http.ResponseWriter, r *http.Request) {
-	row, err := s.Store.QueryOne(r.Context(), `SELECT id, title, introduction, content, version, layout_columns AS "layoutColumns", layout_width AS "layoutWidth", layout_split AS "layoutSplit", updated_at AS "updatedAt" FROM site_terms ORDER BY id LIMIT 1`)
+	row, err := s.Store.QueryOne(r.Context(), termsColumns)
 	if errors.Is(err, pgx.ErrNoRows) {
 		// Java's TermsService.get() persists the default row, so the first read
-		// answers with an id and a timestamp like every later one.
-		row, err = s.Store.QueryOne(r.Context(), `INSERT INTO site_terms(title,introduction,content,version,created_at,updated_at) VALUES($1,$2,$3,'1',$4,$4) RETURNING id,title,introduction,content,version,layout_columns AS "layoutColumns",layout_width AS "layoutWidth",layout_split AS "layoutSplit",updated_at AS "updatedAt"`, "Terms & Conditions", defaultTermsIntroduction, defaultTermsContent, nowWallClock())
+		// answers with an id and a timestamp like every later one. ON CONFLICT
+		// DO NOTHING plus the singleton index keeps two first visitors from
+		// creating two rows.
+		_, _ = s.Store.Exec(r.Context(), `INSERT INTO site_terms(title,introduction,content,version,created_at,updated_at) VALUES($1,$2,$3,'1',$4,$4) ON CONFLICT DO NOTHING`, "Terms & Conditions", defaultTermsIntroduction, defaultTermsContent, nowWallClock())
+		row, err = s.Store.QueryOne(r.Context(), termsColumns)
 	}
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat data.")
@@ -290,7 +295,7 @@ func (s *Server) getPhotos(w http.ResponseWriter, r *http.Request) {
 	for _, row := range rows {
 		imageURL, _ := row["imageUrl"].(string)
 		thumbnail, preview := s.photoVariants(imageURL)
-		row["thumbnailUrl"], row["previewUrl"] = nullableVariant(thumbnail), nullableVariant(preview)
+		row["thumbnailUrl"], row["previewUrl"] = nullableString(thumbnail), nullableString(preview)
 	}
 	writeJSON(w, http.StatusOK, rows)
 }
@@ -358,15 +363,6 @@ func (s *Server) getThumbnailURL(imageURL string) string {
 	return "/uploads/thumbnails/" + id + ".webp"
 }
 
-// nullableVariant answers JSON null when Java's getThumbnailUrl/getPreviewUrl
-// would return null (a photo whose imageUrl is not an upload), instead of "".
-func nullableVariant(url string) any {
-	if url == "" {
-		return nil
-	}
-	return url
-}
-
 func (s *Server) photoVariants(imageURL string) (string, string) {
 	thumbnail := s.getThumbnailURL(imageURL)
 	if !strings.HasPrefix(thumbnail, "/uploads/thumbnails/") {
@@ -394,7 +390,7 @@ func (s *Server) dashboardSummary(w http.ResponseWriter, r *http.Request) {
 // paths format price and time the same way (Java returns one BookingResponse).
 // Spring Boot disables WRITE_DATES_AS_TIMESTAMPS, so Jackson writes LocalTime as
 // the ISO string "09:30:00", which is exactly what the admin UI parses.
-const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", budget, message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount" FROM bookings`
+const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount" FROM bookings`
 
 func normalizeBooking(booking map[string]any) {
 	if price, ok := booking["packagePrice"].(string); ok && decimalPattern.MatchString(price) {
@@ -403,7 +399,7 @@ func normalizeBooking(booking map[string]any) {
 }
 
 func (s *Server) getBookings(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.QueryRows(r.Context(), bookingColumns+` ORDER BY created_at DESC`)
+	rows, err := s.Store.QueryRows(r.Context(), bookingColumns+` ORDER BY created_at DESC LIMIT 500`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat pemesanan.")
 		return
@@ -423,7 +419,6 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 		EventTime     string  `json:"eventTime"`
 		PackageID     *int64  `json:"packageId"`
 		EventLocation *string `json:"eventLocation"`
-		Budget        *string `json:"budget"`
 		Message       *string `json:"message"`
 		TermsAccepted *bool   `json:"termsAccepted"`
 		TermsVersion  string  `json:"termsVersion"`
@@ -494,9 +489,6 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	if request.EventLocation != nil && utf8.RuneCountInString(*request.EventLocation) > 255 {
 		fieldErrors["eventLocation"] = "Event location is too long"
 	}
-	if request.Budget != nil && utf8.RuneCountInString(*request.Budget) > 255 {
-		fieldErrors["budget"] = "Budget is too long"
-	}
 	if utf8.RuneCountInString(request.TermsVersion) > 20 {
 		fieldErrors["termsVersion"] = "Terms version is too long"
 	}
@@ -506,7 +498,13 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	}
 	// Java runs @Valid first and only then consumes the rate-limit slot, so an
 	// invalid request must not count against the booking quota for this IP.
-	if !s.Limiter.Allow("booking:"+ClientIP(r), 5, 10*time.Minute) {
+	// Three windows, all keyed on the caller's address: a burst (three at once),
+	// a sustained rate (ten an hour) and a daily cap (twenty a day). A real
+	// client books once, so these stop a script that walks the form.
+	ip := "booking:" + ClientIP(r)
+	if !s.Limiter.Allow(ip+":burst", 3, time.Minute) ||
+		!s.Limiter.Allow(ip+":hour", 10, time.Hour) ||
+		!s.Limiter.Allow(ip+":day", 20, 24*time.Hour) {
 		writeError(w, http.StatusTooManyRequests, "Too many booking requests. Please try again in a few minutes.")
 		return
 	}
@@ -570,7 +568,7 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	// Java's BookingRequest takes eventTime as LocalTime; Spring writes it back as
 	// the ISO string "09:30:00".
 	eventTimeString := eventTime.Format("15:04:05")
-	err = tx.QueryRow(ctx, `INSERT INTO bookings (name, email, phone, event_date, event_time, package_title, package_price, event_location, budget, message, terms_accepted, terms_accepted_at, terms_version, status, confirmation_email_count, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,TRUE,$11,$12,'PENDING',0,$11,$11) RETURNING id, created_at, updated_at, confirmation_email_count`, request.Name, request.Email, request.Phone, eventDate, eventTimeString, packageTitle, packagePrice, optionalText(request.EventLocation), optionalText(request.Budget), optionalText(request.Message), now, request.TermsVersion).Scan(&id, &createdAt, &updatedAt, &confirmationCount)
+	err = tx.QueryRow(ctx, `INSERT INTO bookings (name, email, phone, event_date, event_time, package_title, package_price, event_location, message, terms_accepted, terms_accepted_at, terms_version, status, confirmation_email_count, created_at, updated_at) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,TRUE,$10,$11,'PENDING',0,$10,$10) RETURNING id, created_at, updated_at, confirmation_email_count`, request.Name, request.Email, request.Phone, eventDate, eventTimeString, packageTitle, packagePrice, optionalText(request.EventLocation), optionalText(request.Message), now, request.TermsVersion).Scan(&id, &createdAt, &updatedAt, &confirmationCount)
 	if err != nil {
 		fail("insert booking", err)
 		return
@@ -579,14 +577,14 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 		fail("commit", err)
 		return
 	}
-	go s.notifyBookingAdmins(r, id)
+	go s.notifyBookingAdmins(id)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": id, "name": request.Name, "email": request.Email, "phone": request.Phone,
 		"eventDate": eventDate.Format("2006-01-02"),
 		"eventTime": eventTimeString, "packageTitle": packageTitle,
 		"packagePrice": decimalValue(packagePrice), "eventLocation": optionalText(request.EventLocation),
-		"budget": optionalText(request.Budget), "message": optionalText(request.Message),
-		"status": "PENDING", "createdAt": wibTimestamp(createdAt), "updatedAt": wibTimestamp(updatedAt),
+		"message": optionalText(request.Message),
+		"status":  "PENDING", "createdAt": wibTimestamp(createdAt), "updatedAt": wibTimestamp(updatedAt),
 		"termsAccepted": true, "termsAcceptedAt": wibTimestamp(now), "termsVersion": request.TermsVersion,
 		"confirmationEmailSentAt": nil, "confirmationEmailCount": confirmationCount,
 	})
@@ -660,6 +658,7 @@ const defaultTermsContent = `# Booking & Reservation
 - Any changes to the terms applicable to a confirmed booking should be communicated and agreed upon by the relevant parties.
 `
 
+// nullableString maps a blank string to SQL NULL / JSON null.
 func nullableString(value string) any {
 	if strings.TrimSpace(value) == "" {
 		return nil
@@ -674,6 +673,14 @@ func nullableString(value string) any {
 func optionalText(value *string) any {
 	if value == nil {
 		return nil
+	}
+	return *value
+}
+
+// deref reads an optional string, "" when it is absent.
+func deref(value *string) string {
+	if value == nil {
+		return ""
 	}
 	return *value
 }
@@ -699,10 +706,4 @@ func (s *Server) rowsOrError(w http.ResponseWriter, rows []map[string]any, err e
 		rows = []map[string]any{}
 	}
 	writeJSON(w, http.StatusOK, rows)
-}
-
-func (s *Server) notImplemented(feature string) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeError(w, http.StatusNotImplemented, fmt.Sprintf("%s is not implemented in the Go migration yet.", feature))
-	}
 }

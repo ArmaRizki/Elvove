@@ -1,14 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { CalendarDays, ChevronLeft, ChevronRight } from "lucide-react";
-import { formatDateDisplay, todayIso } from "../utils/bookingTime";
+import { formatDateDisplay, pad, todayIso } from "../utils/bookingTime";
 
 const MONTHS = [
   "Januari", "Februari", "Maret", "April", "Mei", "Juni",
   "Juli", "Agustus", "September", "Oktober", "November", "Desember",
 ];
 const WEEKDAYS = ["Sen", "Sel", "Rab", "Kam", "Jum", "Sab", "Min"];
-
-const pad = (value) => String(value).padStart(2, "0");
 
 const parseIso = (value) => {
   const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value || "");

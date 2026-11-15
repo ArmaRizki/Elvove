@@ -15,11 +15,11 @@ import {
 import {
   STATUS_OPTIONS,
   formatDate,
-  formatPrice,
   formatTime,
   statusBadge,
   statusLabel,
 } from "../../components/admin/adminFormat";
+import { formatPrice } from "../../utils/format";
 
 function StatusBadge({ status }) {
   return (

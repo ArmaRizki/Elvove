@@ -12,9 +12,9 @@ import { adminApi } from "../../services/adminApi";
 import CustomDatePicker from "../CustomDatePicker";
 import CustomTimePicker from "../CustomTimePicker";
 import { formatDate } from "./adminFormat";
+import { pad } from "../../utils/bookingTime";
 import { adminLabel, adminInput, adminSecondaryButton } from "./adminStyles";
 
-const pad = (n) => String(n).padStart(2, "0");
 const keyOf = (date) =>
   `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}`;
 const timeOf = (value) => (value || "").slice(0, 5) || "Waktu belum diatur";

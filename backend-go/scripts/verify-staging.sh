@@ -95,13 +95,13 @@ VALUES ('Terms & Conditions', NULL, 'Isi syarat dan ketentuan.', '1', NOW(), NOW
 INSERT INTO smtp_settings (id, host, port, username, encrypted_password, encryption, authentication, sender_name, sender_email)
 VALUES (1, '$MAIL_IP', 1025, NULL, NULL, 'NONE', false, 'Elvove', 'no-reply@elvove.test');
 INSERT INTO bookings (name, email, phone, event_type, event_date, event_time, package_title, package_price,
-                      event_location, budget, message, terms_accepted, terms_accepted_at, terms_version,
+                      event_location, message, terms_accepted, terms_accepted_at, terms_version,
                       status, confirmation_email_count, created_at, updated_at)
 VALUES
   ('Klien Satu', 'klien1@example.test', '081234567890', 'Wisuda', CURRENT_DATE + 30, '09:30:00',
-   'Paket Verifikasi', 2500000.00, 'Bandung', '3000000', 'Halo', TRUE, NOW(), '1', 'PENDING', 0, NOW(), NOW()),
+   'Paket Verifikasi', 2500000.00, 'Bandung', 'Halo', TRUE, NOW(), '1', 'PENDING', 0, NOW(), NOW()),
   ('Klien Dua', 'klien2@example.test', '081234567891', 'Wisuda', CURRENT_DATE + 31, '10:00:00',
-   'Paket Verifikasi', 2500000.00, 'Jakarta', '3500000', 'Halo', TRUE, NOW(), '1', 'COMPLETED', 0, NOW(), NOW());
+   'Paket Verifikasi', 2500000.00, 'Jakarta', 'Halo', TRUE, NOW(), '1', 'COMPLETED', 0, NOW(), NOW());
 SQL
 ok 'fixture inserted (admin, package, terms, smtp, 2 bookings)'
 

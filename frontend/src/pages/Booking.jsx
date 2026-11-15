@@ -4,6 +4,7 @@ import SectionHeading from "../components/SectionHeading";
 import CustomTimePicker from "../components/CustomTimePicker";
 import CustomDatePicker from "../components/CustomDatePicker";
 import { isQuarterHour, todayIso } from "../utils/bookingTime";
+import { formatPrice } from "../utils/format";
 import { Link } from "react-router-dom";
 
 const initialForm = {
@@ -14,16 +15,8 @@ const initialForm = {
   eventTime: "",
   packageId: "",
   eventLocation: "",
-  budget: "",
   message: "",
 };
-
-const formatPrice = (price) =>
-  new Intl.NumberFormat("id-ID", {
-    style: "currency",
-    currency: "IDR",
-    maximumFractionDigits: 0,
-  }).format(price);
 
 export default function Booking() {
   const [form, setForm] = useState(initialForm);

@@ -2,7 +2,6 @@
 .env
 .env.*
 !.env.example
-backend/.env
 frontend/.env
 
 # Dependencies
@@ -13,17 +12,15 @@ frontend/node_modules/
 dist/
 build/
 frontend/dist/
-backend/target/
 
 # Local application data
 local-data/
-backend/uploads/
 
 # Database and local backups
 *.sql
 # …but keep versioned schema migrations
-!backend/db/migrations/
-!backend/db/migrations/*.sql
+!db/migrations/
+!db/migrations/*.sql
 *.dump
 *.bak
 *.backup-*

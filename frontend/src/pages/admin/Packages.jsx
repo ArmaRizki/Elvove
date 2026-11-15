@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Plus, Pencil, Trash2, X } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
+import { formatPrice } from "../../utils/format";
 import LoadingState from "../../components/LoadingState";
 import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
@@ -83,8 +84,6 @@ export default function Packages() {
     load();
   };
 
-  const priceOf = (item) => `Rp${Number(item.price).toLocaleString("id-ID")}`;
-
   return (
     <div className="min-w-0">
       <AdminPageHeader
@@ -117,7 +116,7 @@ export default function Packages() {
                 {items.map((item) => (
                   <tr key={item.id} className="border-b border-gray-200 last:border-0">
                     <td className="px-4 py-3 text-gray-700">{item.title}</td>
-                    <td className="px-4 py-3 text-gray-700">{priceOf(item)}</td>
+                    <td className="px-4 py-3 text-gray-700">{formatPrice(item.price)}</td>
                     <td className="px-4 py-3 text-gray-700">{item.highlighted ? "Ya" : "—"}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button
@@ -146,7 +145,7 @@ export default function Packages() {
               <article key={item.id} className="flex items-start justify-between gap-3 border border-gray-200 p-4">
                 <div className="min-w-0">
                   <p className="break-words font-medium text-gray-900">{item.title}</p>
-                  <p className="text-sm text-gray-700">{priceOf(item)}</p>
+                  <p className="text-sm text-gray-700">{formatPrice(item.price)}</p>
                   {item.highlighted && (
                     <p className="mt-1 text-xs text-[#E11D48]">Paling Banyak Dipesan</p>
                   )}

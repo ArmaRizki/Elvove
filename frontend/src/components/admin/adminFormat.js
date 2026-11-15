@@ -69,14 +69,6 @@ export function nowInWib() {
   return WIB_PARTS.format(new Date()).replace(" ", "T");
 }
 
-/** 18500000 → "Rp18.500.000". Returns null when the amount is unknown. */
-export function formatPrice(value) {
-  if (value === null || value === undefined || value === "") return null;
-  const number = Number(value);
-  if (Number.isNaN(number)) return null;
-  return `Rp${number.toLocaleString("id-ID", { maximumFractionDigits: 0 })}`;
-}
-
 /** Joins the date and time of a booking for compact lists. */
 export function formatSchedule(date, time) {
   const day = formatDate(date);

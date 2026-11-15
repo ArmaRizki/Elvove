@@ -1,4 +1,5 @@
-import { formatDate, formatDateTime, formatPrice, formatTime, statusBadge, statusLabel } from "./adminFormat";
+import { formatDate, formatDateTime, formatTime, statusBadge, statusLabel } from "./adminFormat";
+import { formatPrice } from "../../utils/format";
 
 function Field({ label, value, breakAll = false, children }) {
   return (
@@ -65,7 +66,6 @@ export default function BookingDetails({ booking }) {
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
           <Field label="Nama paket" value={packageName} />
           <Field label="Harga paket" value={packagePrice || "Belum tercatat"} />
-          {booking.budget ? <Field label="Anggaran dari klien" value={booking.budget} /> : null}
         </dl>
         <p className="mt-3 text-xs text-gray-500">
           Nama dan harga paket tersimpan pada saat pemesanan dibuat, sehingga tetap sama

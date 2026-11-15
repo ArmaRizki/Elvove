@@ -46,8 +46,8 @@ the same database and the same JSON contract:
 - E-mail templates are a direct port: table-based HTML, hidden preheader,
   plain-text alternative, RFC 2047 subject, `Reply-To` set to the sender.
 
-`backend/` still holds the Java implementation for reference. Documented,
-intentional differences live in `backend-go/README.md`.
+The Spring Boot implementation was deleted once the Go port reached feature
+parity; `backend-go/README.md` lists the differences it had to preserve.
 
 ---
 
@@ -59,10 +59,9 @@ tables, controllers, services, repositories and admin screens:
 - **Galleries** — curated photo sets
 - **Services** — service list and pricing copy
 - **Testimonials**
-- **Videos / Films** — dropped with `backend/db/migrations/2026-11-09-drop-videos.sql`
-- **FAQs** — dropped last, table included, with
-  `backend/db/migrations/2026-11-12-drop-faqs.sql`; the public FAQ page and the
-  admin editor went with it
+- **Videos / Films** — dropped with `db/migrations/2026-11-09-drop-videos.sql`
+- **FAQs** — page, editor, API routes, table, sequence and every reference
+  removed; the schema dump no longer contains `faqs`.
 
 Two stray files from the original repo were removed: `Music - Shortcut.lnk` and
 the unused `hero.png` / `vite.svg` assets.
@@ -119,9 +118,9 @@ terms-and-conditions.
   phones. A layout change does not bump `version`, so accepted bookings are not
   invalidated by it.
 - `about_info.story` became `text` in
-  `backend/db/migrations/2026-11-15-about-story-text.sql`: the HTML markup of the
+  `db/migrations/2026-11-15-about-story-text.sql`: the HTML markup of the
   same prose already exceeded the old varchar(3000). The terms layout columns
-  come from `backend/db/migrations/2026-11-15-terms-layout.sql`.
+  come from `db/migrations/2026-11-15-terms-layout.sql`.
 
 ### E-mail settings
 
@@ -179,7 +178,7 @@ tables, plus `booking` columns for terms acceptance and confirmation-email
 tracking. `galleries`, `services`, `testimonials`, `videos` and `faqs` no
 longer exist.
 
-Schema changes are handwritten SQL in `backend/db/migrations/`, applied by hand.
+Schema changes are handwritten SQL in `db/migrations/`, applied by hand.
 The Go backend never creates or alters tables.
 
 ---
@@ -227,7 +226,6 @@ backend-go/          Go API (the running backend)
   internal/httpapi/  routes, handlers, auth, validation, e-mail
   internal/store/    pgx pool and query helpers
   scripts/           run-web.sh, set-dev-admin.sh, verify-staging.sh
-backend/             legacy Java/Spring Boot implementation (reference)
 frontend/            React 19 + Vite + Tailwind
   src/pages/         public pages
   src/pages/admin/   admin screens
@@ -240,8 +238,6 @@ compose.yml          local stack
 
 ## 9. Tests
 
-- 22 Java test files (the original implementation), including booking workflow,
-  e-mail templates, rate limiter, upload limits and time zone.
 - 9 Go test files covering auth, the limiter, booking validation and dates,
   e-mail rendering, SMTP encryption and the store.
 - `backend-go/scripts/verify-staging.sh` drives a real stack end to end with 25
@@ -250,7 +246,6 @@ compose.yml          local stack
 
 ```bash
 cd backend-go && go test ./...
-cd backend && ./mvnw test     # requires the Java 17 toolchain
 ```
 
 ---
@@ -279,7 +274,7 @@ The Go backend creates no default admin. Uploads live in `./local-data/uploads`.
 
 ## Notes
 
-- `backend-go/README.md` lists the deliberate differences from the Java
+- `backend-go/README.md` lists the deliberate differences from the original
   implementation (unreadable-body handling, Jackson coercions, unknown SMTP
   encryption mode, non-positive path ids).
 - Uploaded images are stored on local disk; a container host needs a persistent

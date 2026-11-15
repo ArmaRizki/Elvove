@@ -2,8 +2,6 @@ package store
 
 import (
 	"context"
-	"encoding/json"
-	"errors"
 	"fmt"
 	"time"
 
@@ -107,12 +105,6 @@ func WallClock(t time.Time) time.Time {
 	return time.Date(wib.Year(), wib.Month(), wib.Day(), wib.Hour(), wib.Minute(), wib.Second(), wib.Nanosecond(), time.UTC)
 }
 
-func (s *Store) Exists(ctx context.Context, query string, args ...any) (bool, error) {
-	var exists bool
-	err := s.Pool.QueryRow(ctx, query, args...).Scan(&exists)
-	return exists, err
-}
-
 func normalize(value any) any {
 	switch v := value.(type) {
 	case time.Time:
@@ -130,13 +122,3 @@ func normalize(value any) any {
 		return v
 	}
 }
-
-func JSONValue(value any) json.RawMessage {
-	encoded, err := json.Marshal(value)
-	if err != nil {
-		return json.RawMessage("null")
-	}
-	return encoded
-}
-
-func IsNotFound(err error) bool { return errors.Is(err, pgx.ErrNoRows) }

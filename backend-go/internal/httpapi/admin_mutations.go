@@ -32,6 +32,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 )
 
 func decodeJSON(w http.ResponseWriter, r *http.Request, target any) bool {
@@ -107,7 +108,12 @@ func (s *Server) createCategory(w http.ResponseWriter, r *http.Request) {
 	slug := slugify(request.Name)
 	row, err := s.Store.QueryOne(r.Context(), `INSERT INTO categories (name, slug, created_at, updated_at) VALUES ($1,$2,NOW(),NOW()) RETURNING id, name, slug`, request.Name, slug)
 	if err != nil {
-		writeError(w, http.StatusConflict, "Category '"+strings.TrimSpace(request.Name)+"' already exists")
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, http.StatusConflict, "Category '"+strings.TrimSpace(request.Name)+"' already exists")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Database operation failed.")
+		}
 		return
 	}
 	writeJSON(w, http.StatusCreated, row)
@@ -131,10 +137,13 @@ func (s *Server) updateCategory(w http.ResponseWriter, r *http.Request) {
 	}
 	row, err := s.Store.QueryOne(r.Context(), `UPDATE categories SET name=$1, slug=$2, updated_at=NOW() WHERE id=$3 RETURNING id, name, slug`, request.Name, slugify(request.Name), id)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		var pgErr *pgconn.PgError
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			writeError(w, 409, "Category name or slug already exists.")
+		} else if errors.Is(err, pgx.ErrNoRows) {
 			notFoundError(w, "Category", id)
 		} else {
-			writeError(w, 409, "Category name or slug already exists.")
+			writeError(w, 500, "Category could not be saved.")
 		}
 		return
 	}
@@ -311,7 +320,7 @@ func (s *Server) savePhoto(w http.ResponseWriter, r *http.Request, id int64, cre
 	if req.DisplayOrder != nil {
 		order = *req.DisplayOrder
 	}
-	row, err := s.Store.QueryOne(r.Context(), `SELECT id FROM categories WHERE id=$1`, *req.CategoryID)
+	_, err := s.Store.QueryOne(r.Context(), `SELECT id FROM categories WHERE id=$1`, *req.CategoryID)
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
 			// Java's PhotoService resolves the category and answers 404.
@@ -321,7 +330,6 @@ func (s *Server) savePhoto(w http.ResponseWriter, r *http.Request, id int64, cre
 		}
 		return
 	}
-	_ = row
 	var result map[string]any
 	if create {
 		result, err = s.Store.QueryOne(r.Context(), `INSERT INTO photos(title,description,image_url,category_id,featured,display_order,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id,title,description,image_url AS "imageUrl",featured,display_order AS "displayOrder",category_id AS "categoryId"`, req.Title, req.Description, req.ImageURL, *req.CategoryID, req.Featured, order)
@@ -336,16 +344,12 @@ func (s *Server) savePhoto(w http.ResponseWriter, r *http.Request, id int64, cre
 		}
 		return
 	}
-	if !create && req.DisplayOrder == nil {
-		_ = s.Store.Pool.QueryRow(r.Context(), `SELECT display_order FROM photos WHERE id=$1`, id).Scan(&order)
-		result["displayOrder"] = order
-	}
 	if cat, err := s.Store.QueryOne(r.Context(), `SELECT name FROM categories WHERE id=$1`, *req.CategoryID); err == nil {
 		result["categoryName"] = cat["name"]
 	}
 	imageURL, _ := result["imageUrl"].(string)
 	thumbnail, preview := s.photoVariants(imageURL)
-	result["thumbnailUrl"], result["previewUrl"] = nullableVariant(thumbnail), nullableVariant(preview)
+	result["thumbnailUrl"], result["previewUrl"] = nullableString(thumbnail), nullableString(preview)
 	status := 200
 	if create {
 		status = 201
@@ -642,11 +646,8 @@ func (s *Server) smtpDial(r *http.Request, c smtpConfig) (*smtp.Client, error) {
 	if c.Authentication && len(s.Config.SMTPEncryptionKey) < 32 {
 		return nil, fmt.Errorf("SMTP encryption key is not configured")
 	}
+	ctx := r.Context()
 	address := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
-	ctx := context.Background()
-	if r != nil && r.Context() != nil {
-		ctx = r.Context()
-	}
 	conn, e := (&net.Dialer{Timeout: 8 * time.Second}).DialContext(ctx, "tcp", address)
 	if e != nil {
 		return nil, e
@@ -860,7 +861,7 @@ func (s *Server) sendBookingConfirmation(w http.ResponseWriter, r *http.Request)
 		Name:          booking.Name,
 		EventDate:     booking.EventDate,
 		EventTime:     booking.EventTime,
-		EventLocation: nullableDeref(booking.EventLocation),
+		EventLocation: deref(booking.EventLocation),
 		PackageTitle:  booking.PackageTitle,
 		PackagePrice:  booking.PackagePrice,
 	}, s.mailSenderName(r), s.contactWhatsApp(r), s.Config.SiteURL)
@@ -875,12 +876,6 @@ func (s *Server) sendBookingConfirmation(w http.ResponseWriter, r *http.Request)
 		return
 	}
 	writeJSON(w, 200, map[string]any{"message": "Email konfirmasi berhasil dikirim ke " + booking.Email + ".", "sentTo": booking.Email, "confirmationEmailSentAt": wibTimestamp(sentAt), "confirmationEmailCount": count})
-}
-func nullableDeref(value *string) string {
-	if value == nil {
-		return ""
-	}
-	return *value
 }
 
 // mailSenderName reads the configured sender name used in the e-mail
@@ -904,7 +899,14 @@ func (s *Server) contactWhatsApp(r *http.Request) string {
 	}
 	return strings.TrimSpace(number)
 }
-func (s *Server) notifyBookingAdmins(r *http.Request, id int64) {
+func (s *Server) notifyBookingAdmins(id int64) {
+	// The goroutine outlives the handler, so a panic here would take the whole
+	// process down: the HTTP recover middleware cannot catch it.
+	defer func() {
+		if v := recover(); v != nil {
+			log.Printf("Notifikasi booking #%d panik: %v", id, v)
+		}
+	}()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 	var enabled bool
@@ -1352,7 +1354,7 @@ func (s *Server) updateTerms(w http.ResponseWriter, r *http.Request) {
 	} else if err == nil {
 		// A layout change is not a content change, so it keeps the terms version
 		// the bookings accepted.
-		if title != req.Title || nullableDeref(&introduction) != *req.Introduction || content != req.Content {
+		if title != req.Title || deref(&introduction) != *req.Introduction || content != req.Content {
 			n, _ := strconv.Atoi(version)
 			version = strconv.Itoa(n + 1)
 		}

@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { Check } from "lucide-react";
 import { publicApi } from "../services/publicApi";
+import { formatPrice } from "../utils/format";
 import SectionHeading from "../components/SectionHeading";
 import LoadingState from "../components/LoadingState";
 
@@ -48,7 +49,7 @@ export default function Packages() {
               </h2>
 
               <p className="font-display text-3xl text-[#E11D48] mb-6 break-words">
-                Rp{Number(pkg.price).toLocaleString("id-ID")}
+                {formatPrice(pkg.price)}
               </p>
 
               <ul className="space-y-3 flex-1 mb-8">

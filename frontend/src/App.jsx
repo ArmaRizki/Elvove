@@ -26,7 +26,6 @@ const AdminPhotos = lazy(() => import("./pages/admin/Photos"));
 const AdminCategories = lazy(() => import("./pages/admin/Categories"));
 const AdminPackages = lazy(() => import("./pages/admin/Packages"));
 const AdminBookings = lazy(() => import("./pages/admin/Bookings"));
-const AdminCalendar = lazy(() => import("./pages/admin/Calendar"));
 const AboutEditor = lazy(() => import("./pages/admin/AboutEditor"));
 const ContactEditor = lazy(() => import("./pages/admin/ContactEditor"));
 const SocialLinksEditor = lazy(() => import("./pages/admin/SocialLinksEditor"));
@@ -70,7 +69,6 @@ export default function App() {
               <Route path="categories" element={<AdminCategories />} />
               <Route path="packages" element={<AdminPackages />} />
               <Route path="bookings" element={<AdminBookings />} />
-              <Route path="calendar" element={<AdminCalendar />} />
               <Route path="about" element={<AboutEditor />} />
               <Route path="contact" element={<ContactEditor />} />
               <Route path="social-links" element={<SocialLinksEditor />} />
