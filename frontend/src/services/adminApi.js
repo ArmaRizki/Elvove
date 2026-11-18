@@ -38,19 +38,27 @@ export const adminApi = {
   updatePackage: (id, data) => api.put(`/api/admin/packages/${id}`, data),
   deletePackage: (id) => api.delete(`/api/admin/packages/${id}`),
 
+  // Google Drive (the client photo folders)
+  getDriveSettings: () => api.get("/api/admin/drive"),
+  saveDriveSettings: (data) => api.put("/api/admin/drive", data),
+  connectDrive: () => api.post("/api/admin/drive/connect"),
+  saveDriveRoot: (rootFolderUrl) => api.post("/api/admin/drive/root", { rootFolderUrl }),
+  createDriveRoot: (name) => api.post("/api/admin/drive/root/create", { name }),
+  disconnectDrive: () => api.post("/api/admin/drive/disconnect"),
+  backfillDriveFolders: () => api.post("/api/admin/drive/backfill"),
+  createBookingDriveFolder: (id) => api.post(`/api/admin/bookings/${id}/drive-folder`),
+
   // Bookings
   getBookings: () => api.get("/api/admin/bookings"),
+  getBooking: (id) => api.get(`/api/admin/bookings/${id}`),
   updateBookingStatus: (id, status) => api.patch(`/api/admin/bookings/${id}/status`, { status }),
   acceptBooking: (id) => api.post(`/api/admin/bookings/${id}/accept`),
   sendBookingConfirmation: (id) => api.post(`/api/admin/bookings/${id}/confirmation-email`),
   sendBookingInvoice: (id) => api.post(`/api/admin/bookings/${id}/invoice-email`),
+  sendBookingSelection: (id) => api.post(`/api/admin/bookings/${id}/selection-email`),
   sendBookingSettlement: (id) => api.post(`/api/admin/bookings/${id}/settlement-email`),
   updateBookingPayment: (id, paymentStatus) =>
     api.patch(`/api/admin/bookings/${id}/payment`, { paymentStatus }),
-  updateBookingDelivery: (id, deliveryUrl) =>
-    api.patch(`/api/admin/bookings/${id}/delivery`, { deliveryUrl }),
-  updateBookingRawFolder: (id, rawFolderUrl) =>
-    api.patch(`/api/admin/bookings/${id}/raw-folder`, { rawFolderUrl }),
   rescheduleBooking: (id, data) => api.patch(`/api/admin/bookings/${id}/reschedule`, data),
   deleteBooking: (id) => api.delete(`/api/admin/bookings/${id}`),
 

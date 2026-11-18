@@ -34,12 +34,27 @@ type Server struct {
 	// e-mail twice for one booking.
 	mailMu  sync.Mutex
 	mailing map[int64]bool
-	// Drive is the Google Drive client for the client photo-selection page. It
-	// is disabled when the OAuth credentials are absent.
+	// Drive is the Google Drive client built from GOOGLE_OAUTH_* environment
+	// variables. It is only the fallback: the connection saved in
+	// drive_settings (admin panel) wins, see driveClientFor.
 	Drive *drive.Client
-	// galleryMu serializes the WebP conversion of one photo, so a grid of
-	// thumbnails does not convert the same original twice.
-	galleryMu sync.Map
+	// drive is the cached client built from drive_settings; driveFor is the
+	// settings timestamp it was built from. cachedDriveSettings and
+	// driveCheckedAt hold the last settings read for driveSettingsTTL.
+	// driveMu guards all four.
+	drive               *drive.Client
+	driveFor            string
+	cachedDriveSettings driveSettings
+	driveCheckedAt      time.Time
+	driveMu             sync.Mutex
+	// galleryMu guards galleryLocks. A lock is dropped when its last holder
+	// unlocks, so the map does not grow with every photo ever viewed.
+	galleryMu    sync.Mutex
+	galleryLocks map[string]*keyedMutex
+	// galleryListed caches each raw folder's Drive listing briefly, so reloading
+	// the client page does not walk the whole folder tree again.
+	galleryListMu sync.Mutex
+	galleryListed map[string]galleryListing
 }
 
 type decimalValue string
@@ -56,7 +71,8 @@ func (d decimalValue) MarshalJSON() ([]byte, error) {
 
 func NewServer(cfg config.Config, db *store.Store) *Server {
 	limiter := NewRateLimiter()
-	s := &Server{Config: cfg, Store: db, Limiter: limiter, mailing: make(map[int64]bool)}
+	s := &Server{Config: cfg, Store: db, Limiter: limiter, mailing: make(map[int64]bool),
+		galleryLocks: make(map[string]*keyedMutex), galleryListed: make(map[string]galleryListing)}
 	s.Auth = &Auth{Store: db, Secret: cfg.JWTSecret, Limiter: limiter, MaxAge: 24 * time.Hour}
 	s.Drive = drive.New(cfg.GoogleDrive.ClientID, cfg.GoogleDrive.ClientSecret, cfg.GoogleDrive.RefreshToken, cfg.GoogleDrive.TokenURL, cfg.GoogleDrive.APIBase, cfg.GoogleDrive.UploadBase)
 	return s
@@ -111,14 +127,15 @@ func (s *Server) Handler() http.Handler {
 	admin := http.NewServeMux()
 	admin.HandleFunc("GET /api/admin/dashboard/summary", s.dashboardSummary)
 	admin.HandleFunc("GET /api/admin/bookings", s.getBookings)
+	admin.HandleFunc("GET /api/admin/bookings/{id}", s.getBooking)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/status", s.updateBookingStatus)
 	admin.HandleFunc("POST /api/admin/bookings/{id}/accept", s.acceptBooking)
 	admin.HandleFunc("POST /api/admin/bookings/{id}/confirmation-email", s.sendBookingConfirmation)
 	admin.HandleFunc("POST /api/admin/bookings/{id}/invoice-email", s.sendBookingInvoice)
+	admin.HandleFunc("POST /api/admin/bookings/{id}/selection-email", s.sendBookingSelection)
 	admin.HandleFunc("POST /api/admin/bookings/{id}/settlement-email", s.sendBookingSettlement)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/payment", s.updateBookingPayment)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/delivery", s.updateBookingDelivery)
-	admin.HandleFunc("PATCH /api/admin/bookings/{id}/raw-folder", s.updateBookingRawFolder)
 	admin.HandleFunc("PATCH /api/admin/bookings/{id}/reschedule", s.rescheduleBooking)
 	admin.HandleFunc("DELETE /api/admin/bookings/{id}", s.deleteBooking)
 	admin.HandleFunc("POST /api/admin/upload", s.upload)
@@ -135,6 +152,14 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("PUT /api/admin/contact", s.updateContact)
 	admin.HandleFunc("PUT /api/admin/terms", s.updateTerms)
 	admin.HandleFunc("PUT /api/admin/social-links", s.updateSocialLinks)
+	admin.HandleFunc("GET /api/admin/drive", s.getDriveSettings)
+	admin.HandleFunc("PUT /api/admin/drive", s.saveDriveSettings)
+	admin.HandleFunc("POST /api/admin/drive/connect", s.startDriveConnect)
+	admin.HandleFunc("POST /api/admin/drive/root", s.saveDriveRoot)
+	admin.HandleFunc("POST /api/admin/drive/root/create", s.createDriveRoot)
+	admin.HandleFunc("POST /api/admin/drive/disconnect", s.disconnectDrive)
+	admin.HandleFunc("POST /api/admin/drive/backfill", s.backfillDriveFolders)
+	admin.HandleFunc("POST /api/admin/bookings/{id}/drive-folder", s.createBookingDriveFolder)
 	admin.HandleFunc("GET /api/admin/settings/smtp", s.getSMTPSettings)
 	admin.HandleFunc("PUT /api/admin/settings/smtp", s.saveSMTPSettings)
 	admin.HandleFunc("GET /api/admin/settings/booking-notifications", s.getNotificationSettings)
@@ -148,6 +173,7 @@ func (s *Server) Handler() http.Handler {
 	mux.HandleFunc("GET /api/gallery/{token}/photos/{id}", s.galleryPhoto)
 	mux.HandleFunc("PUT /api/gallery/{token}/selection", s.saveSelection)
 	mux.HandleFunc("POST /api/gallery/{token}/submit", s.submitSelection)
+	mux.HandleFunc("GET /api/admin/drive/callback", s.driveCallback)
 	mux.HandleFunc("POST /api/bookings", s.createBooking)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		// Spring Security runs before the router, so an unknown path only reaches
@@ -415,7 +441,41 @@ func (s *Server) dashboardSummary(w http.ResponseWriter, r *http.Request) {
 // paths format price and time the same way (Java returns one BookingResponse).
 // Spring Boot disables WRITE_DATES_AS_TIMESTAMPS, so Jackson writes LocalTime as
 // the ISO string "09:30:00", which is exactly what the admin UI parses.
-const bookingColumns = `SELECT id, name, email, phone, event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime", package_title AS "packageTitle", package_price::text AS "packagePrice", event_location AS "eventLocation", message, status, created_at AS "createdAt", updated_at AS "updatedAt", terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion", confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount", down_payment_paid_at AS "downPaymentPaidAt", settlement_paid_at AS "settlementPaidAt", invoice_email_sent_at AS "invoiceEmailSentAt", COALESCE(invoice_email_count, 0) AS "invoiceEmailCount", settlement_email_sent_at AS "settlementEmailSentAt", COALESCE(settlement_email_count, 0) AS "settlementEmailCount", COALESCE(delivery_url, '') AS "deliveryUrl", COALESCE(selection_token, '') AS "selectionToken", COALESCE(raw_folder_id, '') AS "rawFolderId", COALESCE(selection_folder_id, '') AS "selectionFolderId", COALESCE(selection_limit, 0) AS "selectionLimit", selection_submitted_at AS "selectionSubmittedAt", (SELECT count(*) FROM booking_photos bp WHERE bp.booking_id = bookings.id) AS "photoCount", (SELECT count(*) FROM booking_photos bp WHERE bp.booking_id = bookings.id AND bp.selected) AS "selectedCount", CASE WHEN settlement_paid_at IS NOT NULL THEN 'PAID' WHEN down_payment_paid_at IS NOT NULL THEN 'DOWN_PAYMENT_PAID' ELSE 'UNPAID' END AS "paymentStatus" FROM bookings`
+//
+// bookingDetailColumns adds to the same list instead of repeating it, so a new
+// column is added once and reaches both views. These are vars, not consts,
+// because selectionLimitSQL builds the quota expression the client page and the
+// e-mails use too.
+var bookingBaseColumns = `SELECT bookings.id, bookings.name, bookings.email, bookings.phone,
+		event_date AS "eventDate", to_char(event_time, 'HH24:MI:SS') AS "eventTime",
+		package_title AS "packageTitle", package_price::text AS "packagePrice",
+		event_location AS "eventLocation", message, status,
+		created_at AS "createdAt", updated_at AS "updatedAt",
+		terms_accepted AS "termsAccepted", terms_accepted_at AS "termsAcceptedAt", terms_version AS "termsVersion",
+		confirmation_email_sent_at AS "confirmationEmailSentAt", COALESCE(confirmation_email_count, 0) AS "confirmationEmailCount",
+		down_payment_paid_at AS "downPaymentPaidAt", settlement_paid_at AS "settlementPaidAt",
+		invoice_email_sent_at AS "invoiceEmailSentAt", COALESCE(invoice_email_count, 0) AS "invoiceEmailCount",
+		settlement_email_sent_at AS "settlementEmailSentAt", COALESCE(settlement_email_count, 0) AS "settlementEmailCount",
+		selection_email_sent_at AS "selectionEmailSentAt", COALESCE(selection_email_count, 0) AS "selectionEmailCount",
+		COALESCE(delivery_url, '') AS "deliveryUrl", COALESCE(selection_token, '') AS "selectionToken",
+		COALESCE(raw_folder_id, '') AS "rawFolderId",
+		` + selectionLimitSQL("bookings") + ` AS "selectionLimit", selection_submitted_at AS "selectionSubmittedAt",
+		CASE WHEN settlement_paid_at IS NOT NULL THEN 'PAID'
+			WHEN down_payment_paid_at IS NOT NULL THEN 'DOWN_PAYMENT_PAID'
+			ELSE 'UNPAID' END AS "paymentStatus"`
+
+var bookingColumns = bookingBaseColumns + `
+	FROM bookings`
+
+// bookingDetailColumns adds what only the single-record view shows: the folder
+// tree and the photo counts. The list view skips them, so opening the list
+// stays one cheap query instead of two count(*) subqueries per row.
+var bookingDetailColumns = bookingBaseColumns + `,
+		COALESCE(folder_webp_id, '') AS "folderWebpId",
+		COALESCE(folder_mustedit_id, '') AS "folderMusteditId", COALESCE(folder_edit_id, '') AS "folderEditId",
+		(SELECT count(*) FROM booking_photos bp WHERE bp.booking_id = bookings.id) AS "photoCount",
+		(SELECT count(*) FROM booking_photos bp WHERE bp.booking_id = bookings.id AND bp.selected) AS "selectedCount"
+	FROM bookings`
 
 func normalizeBooking(booking map[string]any) {
 	if price, ok := booking["packagePrice"].(string); ok && decimalPattern.MatchString(price) {
@@ -424,7 +484,7 @@ func normalizeBooking(booking map[string]any) {
 }
 
 func (s *Server) getBookings(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.QueryRows(r.Context(), bookingColumns+` ORDER BY created_at DESC LIMIT 500`)
+	rows, err := s.Store.QueryRows(r.Context(), bookingColumns+` ORDER BY created_at DESC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat pemesanan.")
 		return
@@ -433,6 +493,25 @@ func (s *Server) getBookings(w http.ResponseWriter, r *http.Request) {
 		normalizeBooking(booking)
 	}
 	s.rowsOrError(w, rows, nil)
+}
+
+// getBooking is the single-record view: it adds the folder tree and the photo
+// counts the list view leaves out.
+func (s *Server) getBooking(w http.ResponseWriter, r *http.Request) {
+	id, ok := bookingIDFromPath(w, r)
+	if !ok {
+		return
+	}
+	booking, err := s.fetchBooking(r, id)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			writeError(w, http.StatusNotFound, "Pemesanan tidak ditemukan.")
+		} else {
+			writeError(w, http.StatusInternalServerError, "Gagal memuat pemesanan.")
+		}
+		return
+	}
+	writeJSON(w, http.StatusOK, booking)
 }
 
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
@@ -604,6 +683,10 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	go s.notifyBookingAdmins(id)
+	// The Drive folder tree (the client folder plus webp and mustedit) is made
+	// in the background: the customer must not wait on Google, and a Drive that
+	// is not connected must not fail a booking.
+	s.provisionBookingFolders(id)
 	writeJSON(w, http.StatusCreated, map[string]any{
 		"id": id, "name": request.Name, "email": request.Email, "phone": request.Phone,
 		"eventDate": eventDate.Format("2006-01-02"),

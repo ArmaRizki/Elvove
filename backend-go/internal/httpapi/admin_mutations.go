@@ -2,28 +2,16 @@ package httpapi
 
 import (
 	"context"
-	"crypto/aes"
-	"crypto/cipher"
-	"crypto/rand"
-	"crypto/sha256"
-	"crypto/tls"
-	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"math/big"
-	"mime/multipart"
-	"net"
 	"net/http"
-	"net/mail"
-	"net/smtp"
 	"net/textproto"
 	"net/url"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"regexp"
 	"strconv"
@@ -513,444 +501,6 @@ type smtpConfig struct {
 	SenderEmail       string
 }
 
-func (s *Server) loadSMTP(r *http.Request) (smtpConfig, error) {
-	var c smtpConfig
-	err := s.Store.Pool.QueryRow(r.Context(), `SELECT host,port,COALESCE(username,''),COALESCE(encrypted_password,''),encryption,authentication,sender_name,sender_email FROM smtp_settings WHERE id=1`).Scan(&c.Host, &c.Port, &c.Username, &c.EncryptedPassword, &c.Encryption, &c.Authentication, &c.SenderName, &c.SenderEmail)
-	return c, err
-}
-func (s *Server) getSMTPSettings(w http.ResponseWriter, r *http.Request) {
-	c, e := s.loadSMTP(r)
-	if errors.Is(e, pgx.ErrNoRows) {
-		writeJSON(w, 200, map[string]any{"configured": false, "host": "smtp.gmail.com", "port": 587, "username": "", "passwordConfigured": false, "encryption": "STARTTLS", "authentication": true, "senderName": "Elvove", "senderEmail": "elvo.vee@gmail.com"})
-		return
-	}
-	if e != nil {
-		writeError(w, 500, "SMTP settings could not be loaded.")
-		return
-	}
-	writeJSON(w, 200, smtpResponse(c))
-}
-func smtpResponse(c smtpConfig) map[string]any {
-	return map[string]any{"configured": true, "host": c.Host, "port": c.Port, "username": c.Username, "passwordConfigured": c.EncryptedPassword != "", "encryption": c.Encryption, "authentication": c.Authentication, "senderName": c.SenderName, "senderEmail": c.SenderEmail}
-}
-func (s *Server) saveSMTPSettings(w http.ResponseWriter, r *http.Request) {
-	var q struct {
-		Host           string `json:"host"`
-		Port           *int   `json:"port"`
-		Username       string `json:"username"`
-		Password       string `json:"password"`
-		Encryption     string `json:"encryption"`
-		Authentication *bool  `json:"authentication"`
-		SenderName     string `json:"senderName"`
-		SenderEmail    string `json:"senderEmail"`
-	}
-	if !decodeJSON(w, r, &q) {
-		return
-	}
-	q.Host = strings.TrimSpace(q.Host)
-	q.Username = strings.TrimSpace(q.Username)
-	q.SenderName = strings.TrimSpace(q.SenderName)
-	q.SenderEmail = strings.TrimSpace(q.SenderEmail)
-	q.Encryption = strings.ToUpper(strings.TrimSpace(q.Encryption))
-	// Mirrors SmtpRequest's bean constraints. Java has no messages on them, so
-	// the fieldErrors carry Hibernate Validator's default wording.
-	fieldErrors := map[string]string{}
-	if q.Host == "" {
-		fieldErrors["host"] = "must not be blank"
-	}
-	if q.Port == nil {
-		fieldErrors["port"] = "must not be null"
-	} else if *q.Port < 1 {
-		fieldErrors["port"] = "must be greater than or equal to 1"
-	} else if *q.Port > 65535 {
-		fieldErrors["port"] = "must be less than or equal to 65535"
-	}
-	if q.Encryption == "" {
-		fieldErrors["encryption"] = "must not be blank"
-	}
-	if q.Authentication == nil {
-		fieldErrors["authentication"] = "must not be null"
-	}
-	if q.SenderName == "" {
-		fieldErrors["senderName"] = "must not be blank"
-	}
-	if q.SenderEmail == "" {
-		fieldErrors["senderEmail"] = "must not be blank"
-	} else if addr, e := mail.ParseAddress(q.SenderEmail); e != nil || addr.Address != q.SenderEmail {
-		fieldErrors["senderEmail"] = "must be a well-formed email address"
-	}
-	if len(fieldErrors) > 0 {
-		writeValidationError(w, fieldErrors)
-		return
-	}
-	if q.Encryption != "NONE" && q.Encryption != "SSL" && q.Encryption != "STARTTLS" {
-		// Java throws IllegalArgumentException here, whose text the catch-all
-		// handler would turn into a 500; the message is kept, the status is not.
-		writeError(w, 400, "Encryption harus NONE, SSL, atau STARTTLS.")
-		return
-	}
-	if !validText(q.SenderEmail, 255, true) || !validText(q.Host, 255, true) || !validText(q.SenderName, 150, true) {
-		writeError(w, 400, "SMTP settings are invalid.")
-		return
-	}
-	port := *q.Port
-	existing, _ := s.loadSMTP(r)
-	encrypted := existing.EncryptedPassword
-	var e error
-	if strings.TrimSpace(q.Password) != "" {
-		if len(s.Config.SMTPEncryptionKey) < 32 {
-			writeError(w, 503, "SMTP encryption is not configured.")
-			return
-		}
-		encrypted, e = encryptSMTPPassword(s.Config.SMTPEncryptionKey, q.Password)
-		if e != nil {
-			writeError(w, 500, "SMTP password could not be encrypted.")
-			return
-		}
-	} else if encrypted == "" && *q.Authentication {
-		writeError(w, 400, "Password SMTP wajib diisi untuk autentikasi.")
-		return
-	}
-	_, e = s.Store.Exec(r.Context(), `INSERT INTO smtp_settings(id,host,port,username,encrypted_password,encryption,authentication,sender_name,sender_email) VALUES(1,$1,$2,$3,$4,$5,$6,$7,$8) ON CONFLICT(id) DO UPDATE SET host=EXCLUDED.host,port=EXCLUDED.port,username=EXCLUDED.username,encrypted_password=EXCLUDED.encrypted_password,encryption=EXCLUDED.encryption,authentication=EXCLUDED.authentication,sender_name=EXCLUDED.sender_name,sender_email=EXCLUDED.sender_email`, q.Host, q.Port, q.Username, nullableString(encrypted), q.Encryption, *q.Authentication, q.SenderName, q.SenderEmail)
-	if e != nil {
-		writeError(w, 500, "SMTP settings could not be saved.")
-		return
-	}
-	writeJSON(w, 200, smtpResponse(smtpConfig{q.Host, port, q.Username, encrypted, q.Encryption, *q.Authentication, q.SenderName, q.SenderEmail}))
-}
-func encryptSMTPPassword(secret []byte, plain string) (string, error) {
-	key := sha256.Sum256(secret)
-	block, e := aes.NewCipher(key[:])
-	if e != nil {
-		return "", e
-	}
-	g, e := cipher.NewGCM(block)
-	if e != nil {
-		return "", e
-	}
-	nonce := make([]byte, g.NonceSize())
-	if _, e = rand.Read(nonce); e != nil {
-		return "", e
-	}
-	return base64.StdEncoding.EncodeToString(append(nonce, g.Seal(nil, nonce, []byte(plain), nil)...)), nil
-}
-func decryptSMTPPassword(secret []byte, value string) (string, error) {
-	raw, e := base64.StdEncoding.DecodeString(value)
-	if e != nil {
-		return "", e
-	}
-	key := sha256.Sum256(secret)
-	block, e := aes.NewCipher(key[:])
-	if e != nil {
-		return "", e
-	}
-	g, e := cipher.NewGCM(block)
-	if e != nil {
-		return "", e
-	}
-	if len(raw) < g.NonceSize() {
-		return "", fmt.Errorf("invalid encrypted password")
-	}
-	plain, e := g.Open(nil, raw[:g.NonceSize()], raw[g.NonceSize():], nil)
-	return string(plain), e
-}
-func (s *Server) smtpDial(r *http.Request, c smtpConfig) (*smtp.Client, error) {
-	if c.Authentication && len(s.Config.SMTPEncryptionKey) < 32 {
-		return nil, fmt.Errorf("SMTP encryption key is not configured")
-	}
-	ctx := r.Context()
-	address := net.JoinHostPort(c.Host, strconv.Itoa(c.Port))
-	conn, e := (&net.Dialer{Timeout: 8 * time.Second}).DialContext(ctx, "tcp", address)
-	if e != nil {
-		return nil, e
-	}
-	deadline := time.Now().Add(8 * time.Second)
-	_ = conn.SetDeadline(deadline)
-	stopDeadline := context.AfterFunc(ctx, func() { _ = conn.SetDeadline(time.Now()) })
-	defer stopDeadline()
-	var client *smtp.Client
-	if strings.EqualFold(c.Encryption, "SSL") {
-		tlsConn := tls.Client(conn, &tls.Config{ServerName: c.Host, MinVersion: tls.VersionTLS12})
-		if e = tlsConn.Handshake(); e != nil {
-			conn.Close()
-			return nil, e
-		}
-		client, e = smtp.NewClient(tlsConn, c.Host)
-	} else {
-		client, e = smtp.NewClient(conn, c.Host)
-		if e == nil && strings.EqualFold(c.Encryption, "STARTTLS") {
-			ok, _ := client.Extension("STARTTLS")
-			if !ok {
-				client.Close()
-				return nil, fmt.Errorf("SMTP server does not support STARTTLS")
-			}
-			e = client.StartTLS(&tls.Config{ServerName: c.Host, MinVersion: tls.VersionTLS12})
-		}
-	}
-	if e != nil {
-		conn.Close()
-		return nil, e
-	}
-	if c.Authentication {
-		password, e := decryptSMTPPassword(s.Config.SMTPEncryptionKey, c.EncryptedPassword)
-		if e != nil {
-			client.Close()
-			return nil, fmt.Errorf("SMTP password could not be decrypted")
-		}
-		auth := smtp.PlainAuth("", c.Username, password, c.Host)
-		if e = client.Auth(auth); e != nil {
-			client.Close()
-			return nil, e
-		}
-	}
-	return client, nil
-}
-func (s *Server) sendSMTPMessage(r *http.Request, to, subject, htmlBody, textBody string) error {
-	req := r
-	if req == nil {
-		req = &http.Request{}
-	}
-	c, e := s.loadSMTP(req)
-	if e != nil {
-		return fmt.Errorf("SMTP belum dikonfigurasi: %w", e)
-	}
-	client, e := s.smtpDial(req, c)
-	if e != nil {
-		return fmt.Errorf("SMTP dial: %w", e)
-	}
-	defer client.Close()
-	from := formatMailFrom(c.SenderName, c.SenderEmail)
-	if e = client.Mail(c.SenderEmail); e != nil {
-		return e
-	}
-	if e = client.Rcpt(to); e != nil {
-		return e
-	}
-	writer, e := client.Data()
-	if e != nil {
-		return e
-	}
-	message := buildMIMEMessage(from, to, c.SenderEmail, subject, htmlBody, textBody)
-	if _, e = io.WriteString(writer, message); e != nil {
-		writer.Close()
-		return e
-	}
-	return writer.Close()
-}
-
-// buildMIMEMessage assembles the message sendSMTPMessage hands to the server.
-// Date and Message-ID are set explicitly because JavaMail always adds them and
-// their absence makes Gmail and spam filters hold the message back.
-//
-// When there is an HTML body the message is multipart/related: the alternative
-// part carries text and HTML, and the images the HTML references by
-// "cid:" are attached beside it. Mail clients block remote images by default,
-// so the logo and the QR code have to travel with the message.
-func buildMIMEMessage(from, to, senderEmail, subject, htmlBody, textBody string) string {
-	subjectHeader := mimeWord(subject)
-	// Replies go back to the same business inbox the message came from, the
-	// same way Java's MimeMessageHelper.setReplyTo does.
-	replyTo := ""
-	if address := strings.TrimSpace(senderEmail); address != "" {
-		replyTo = fmt.Sprintf("Reply-To: %s\r\n", address)
-	}
-	// WIB, because the JVM this replaced ran with Asia/Jakarta as its default
-	// zone and JavaMail stamped Date there. WallClock re-tags as UTC for the
-	// database, so the offset is formatted explicitly.
-	headers := "Date: " + time.Now().In(jakartaZone).Format(time.RFC1123Z) + "\r\n" +
-		"Message-ID: <" + newUploadID() + "@" + messageIDDomain(senderEmail) + ">\r\n"
-	if htmlBody == "" {
-		return fmt.Sprintf("From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", from, to, replyTo, headers, subjectHeader, base64.StdEncoding.EncodeToString([]byte(textBody)))
-	}
-	alternative := "elvove-alternative-" + newUploadID()
-	related := "elvove-related-" + newUploadID()
-	var body strings.Builder
-	fmt.Fprintf(&body, "From: %s\r\nTo: %s\r\n%s%sSubject: %s\r\nMIME-Version: 1.0\r\n", from, to, replyTo, headers, subjectHeader)
-	fmt.Fprintf(&body, "Content-Type: multipart/related; boundary=\"%s\"; type=\"multipart/alternative\"\r\n\r\n", related)
-	fmt.Fprintf(&body, "--%s\r\nContent-Type: multipart/alternative; boundary=\"%s\"\r\n\r\n", related, alternative)
-	fmt.Fprintf(&body, "--%s\r\nContent-Type: text/plain; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", alternative, base64.StdEncoding.EncodeToString([]byte(textBody)))
-	fmt.Fprintf(&body, "\r\n--%s\r\nContent-Type: text/html; charset=UTF-8\r\nContent-Transfer-Encoding: base64\r\n\r\n%s", alternative, base64.StdEncoding.EncodeToString([]byte(htmlBody)))
-	fmt.Fprintf(&body, "\r\n--%s--\r\n", alternative)
-	// Only the images this message actually references are attached: an unused
-	// part shows up as an attachment in some clients and makes the message
-	// heavier for nothing.
-	for _, image := range emailInlineImages() {
-		if !strings.Contains(htmlBody, emailImageSource(image.ID)) {
-			continue
-		}
-		fmt.Fprintf(&body, "--%s\r\nContent-Type: %s\r\nContent-Transfer-Encoding: base64\r\nContent-ID: <%s>\r\nContent-Disposition: inline; filename=\"%s.png\"\r\n\r\n%s",
-			related, image.ContentType, image.ID, image.ID, base64Lines(image.Data))
-	}
-	fmt.Fprintf(&body, "--%s--\r\n", related)
-	return body.String()
-}
-
-// messageIDDomain uses the sender's domain, falling back to the site host, so a
-// Message-ID is always well formed even when SMTP has no address configured.
-func messageIDDomain(senderEmail string) string {
-	if _, domain, ok := strings.Cut(strings.TrimSpace(senderEmail), "@"); ok {
-		if domain = strings.TrimSpace(domain); domain != "" {
-			return domain
-		}
-	}
-	return "elvove.site"
-}
-
-// mimeWord encodes a header value as an RFC 2047 encoded-word when it holds
-// characters outside US-ASCII, the way JavaMail writes non-ASCII subjects and
-// display names.
-func mimeWord(value string) string {
-	for _, r := range value {
-		if r > 127 {
-			return "=?UTF-8?B?" + base64.StdEncoding.EncodeToString([]byte(value)) + "?="
-		}
-	}
-	return value
-}
-
-// formatMailFrom builds the From header, MIME-encoding a display name that is
-// not US-ASCII so the header stays valid for strict servers.
-func formatMailFrom(name, address string) string {
-	name = strings.TrimSpace(name)
-	if name == "" {
-		return address
-	}
-	address = strings.TrimSpace(address)
-	for _, r := range name {
-		if r > 127 {
-			return mimeWord(name) + " <" + address + ">"
-		}
-	}
-	from := mail.Address{Name: name, Address: address}
-	return from.String()
-}
-
-// customerMail describes one manually sent customer e-mail: how the panel names
-// it, which booking columns record a delivery, which JSON keys report it, and
-// when the booking is allowed to receive it. Every column and key here is a
-// code constant, never request input.
-type customerMail struct {
-	Label       string // "konfirmasi", "invoice", "pelunasan"
-	NoEmail     string // full sentence when the booking has no client address
-	SentColumn  string
-	CountColumn string
-	SentKey     string
-	CountKey    string
-	Refuse      func(mailBooking) string // "" when the booking may receive it
-	Render      func(mailBooking, string, string, string) (string, string, string)
-}
-
-// mailBooking is one booking loaded for a customer e-mail: the template values
-// plus the status and payment columns the guards read.
-type mailBooking struct {
-	bookingEmail
-	Status      string
-	DownPaidAt  string // YYYY-MM-DD; empty when no payment is recorded
-	SettledAt   string // YYYY-MM-DD; empty when the balance is still open
-	DeliveryURL string // Google Drive folder with the edited photos
-	// The client photo-selection link travels in the settlement notice, so the
-	// customer picks the photos to edit in the same message that closes payment.
-	SelectionToken string
-	SelectionLimit int
-}
-
-// invoiceDetails turns the recorded payment dates, the delivery link and the
-// photo-selection link into what the invoice and the settlement notice print.
-func (b mailBooking) invoiceDetails(now time.Time) invoiceDetails {
-	number := emailInvoiceNumber(b.ID, now.Year())
-	return invoiceDetails{
-		Number:         number,
-		IssuedAt:       now.Format("2006-01-02"),
-		DownPaidAt:     b.DownPaidAt,
-		SettledAt:      b.SettledAt,
-		DeliveryURL:    b.DeliveryURL,
-		SelectionLimit: b.SelectionLimit,
-	}
-}
-
-// selectionLink is the absolute address of the client page, built from the site
-// address the mail is rendered with so the customer opens the same host. A
-// package with no photo quota has no page worth opening, so no link is printed.
-func (b mailBooking) selectionLink(siteURL string) string {
-	if b.SelectionToken == "" || b.SelectionLimit < 1 {
-		return ""
-	}
-	return strings.TrimRight(emailSiteURL(siteURL), "/") + "/pilih/" + b.SelectionToken
-}
-
-// loadMailBooking reads one booking for an e-mail endpoint. A missing row comes
-// back as pgx.ErrNoRows so each handler keeps its own not-found wording.
-func (s *Server) loadMailBooking(ctx context.Context, id int64) (mailBooking, error) {
-	var b mailBooking
-	err := s.Store.Pool.QueryRow(ctx, `SELECT id,name,COALESCE(email,''),COALESCE(phone,''),COALESCE(to_char(event_date,'YYYY-MM-DD'),''),COALESCE(to_char(event_time,'HH24:MI'),''),COALESCE(package_title,''),COALESCE(package_price::text,''),COALESCE(event_location,''),status,COALESCE(to_char(down_payment_paid_at,'YYYY-MM-DD'),''),COALESCE(to_char(settlement_paid_at,'YYYY-MM-DD'),''),COALESCE(delivery_url,'') FROM bookings WHERE id=$1`, id).
-		Scan(&b.ID, &b.Name, &b.Email, &b.Phone, &b.EventDate, &b.EventTime, &b.PackageTitle, &b.PackagePrice, &b.EventLocation, &b.Status, &b.DownPaidAt, &b.SettledAt, &b.DeliveryURL)
-	return b, err
-}
-
-// sendCustomerMail is the shared body of the manual customer e-mail endpoints:
-// guard against a double click, load, refuse when the booking is not eligible,
-// render, send, and record the delivery. A failed send leaves the tracking
-// columns untouched so the admin can simply retry.
-func (s *Server) sendCustomerMail(w http.ResponseWriter, r *http.Request, mail customerMail) {
-	id, ok := bookingIDFromPath(w, r)
-	if !ok {
-		return
-	}
-	s.mailMu.Lock()
-	if s.mailing[id] {
-		s.mailMu.Unlock()
-		writeError(w, 400, "Email "+mail.Label+" untuk pemesanan ini sedang dikirim. Tunggu hingga proses selesai.")
-		return
-	}
-	s.mailing[id] = true
-	s.mailMu.Unlock()
-	defer func() {
-		s.mailMu.Lock()
-		delete(s.mailing, id)
-		s.mailMu.Unlock()
-	}()
-	b, err := s.loadMailBooking(r.Context(), id)
-	if errors.Is(err, pgx.ErrNoRows) {
-		// Java's workflow controller uses ResourceNotFoundException with a plain
-		// message for this endpoint rather than the generated one.
-		writeError(w, 404, "Pemesanan tidak ditemukan.")
-		return
-	}
-	if err != nil {
-		writeError(w, 500, "Booking could not be loaded.")
-		return
-	}
-	if refusal := mail.Refuse(b); refusal != "" {
-		writeError(w, 400, refusal)
-		return
-	}
-	if strings.TrimSpace(b.Email) == "" {
-		writeError(w, 400, mail.NoEmail)
-		return
-	}
-	subject, htmlBody, textBody := mail.Render(b, s.mailSenderName(r), s.contactWhatsApp(r), s.Config.SiteURL)
-	if err = s.sendSMTPMessage(r, b.Email, subject, htmlBody, textBody); err != nil {
-		writeError(w, 400, "Email "+mail.Label+" gagal dikirim. Periksa konfigurasi pada Pengaturan Email, lalu coba lagi.")
-		return
-	}
-	var sentAt time.Time
-	var count int
-	// The column names are the constants in mail, so this is not string-built SQL
-	// from user input.
-	record := `UPDATE bookings SET ` + mail.SentColumn + `=NOW(),` + mail.CountColumn +
-		`=COALESCE(` + mail.CountColumn + `,0)+1 WHERE id=$1 RETURNING ` + mail.SentColumn + `,` + mail.CountColumn
-	if err = s.Store.Pool.QueryRow(r.Context(), record, id).Scan(&sentAt, &count); err != nil {
-		writeError(w, 400, "Email "+mail.Label+" terkirim, tetapi status pengiriman gagal disimpan. Silakan periksa data pemesanan.")
-		return
-	}
-	writeJSON(w, 200, map[string]any{
-		"message":     "Email " + mail.Label + " berhasil dikirim ke " + b.Email + ".",
-		"sentTo":      b.Email,
-		mail.SentKey:  wibTimestamp(sentAt),
-		mail.CountKey: count,
-	})
-}
-
 // bookingIDFromPath reads and validates the {id} path value shared by the
 // booking mutation endpoints.
 func bookingIDFromPath(w http.ResponseWriter, r *http.Request) (int64, bool) {
@@ -1002,7 +552,7 @@ func (s *Server) sendBookingInvoice(w http.ResponseWriter, r *http.Request) {
 				return "Tandai pembayaran sebagai lunas terlebih dahulu, lalu kirim invoice."
 			}
 			if strings.TrimSpace(b.DeliveryURL) == "" {
-				return "Isi link Google Drive foto edit terlebih dahulu, lalu kirim invoice."
+				return "Link folder foto edit belum ada. Buka detail pemesanan, tekan Periksa pada folder foto klien agar tautannya terisi, lalu kirim invoice."
 			}
 			return ""
 		},
@@ -1039,9 +589,40 @@ func (s *Server) sendBookingSettlement(w http.ResponseWriter, r *http.Request) {
 			return ""
 		},
 		Render: func(b mailBooking, sender, whatsapp, siteURL string) (string, string, string) {
+			return renderBookingSettlement(b.bookingEmail, b.invoiceDetails(nowWallClock()), sender, whatsapp, siteURL)
+		},
+	})
+}
+
+// sendBookingSelection sends the notice that opens the client page. It goes out
+// before the settlement one, so the client picks the photos while they are
+// fresh and the settlement notice stays a request for money only.
+func (s *Server) sendBookingSelection(w http.ResponseWriter, r *http.Request) {
+	s.sendCustomerMail(w, r, customerMail{
+		Label:       "pilihan foto",
+		NoEmail:     "Pemesanan ini tidak memiliki alamat email klien, sehingga email pilihan foto tidak dapat dikirim.",
+		SentColumn:  "selection_email_sent_at",
+		CountColumn: "selection_email_count",
+		SentKey:     "selectionEmailSentAt",
+		CountKey:    "selectionEmailCount",
+		Refuse: func(b mailBooking) string {
+			if b.Status != "ACCEPTED" && b.Status != "COMPLETED" {
+				return "Email pilihan foto hanya dapat dikirim untuk pemesanan yang sudah diterima."
+			}
+			if b.RawFolder == "" {
+				return "Folder foto klien belum ada. Buka detail pemesanan, tekan Periksa pada folder foto klien, lalu kirim email pilihan foto."
+			}
+			return ""
+		},
+		Render: func(b mailBooking, sender, whatsapp, siteURL string) (string, string, string) {
+			// A booking taken before selection links existed has no token, and a
+			// notice without the link cannot be acted on.
+			if b.SelectionToken == "" {
+				b.SelectionToken = s.ensureSelectionToken(r.Context(), b.ID)
+			}
 			details := b.invoiceDetails(nowWallClock())
 			details.GalleryURL = b.selectionLink(siteURL)
-			return renderBookingSettlement(b.bookingEmail, details, sender, whatsapp, siteURL)
+			return renderBookingSelection(b.bookingEmail, details, sender, whatsapp, siteURL)
 		},
 	})
 }
@@ -1269,165 +850,6 @@ func adminBookingURL(baseURL string, bookingID int64) (string, error) {
 	}
 	return trimmed + "/admin/bookings?booking=" + strconv.FormatInt(bookingID, 10), nil
 }
-func (s *Server) upload(w http.ResponseWriter, r *http.Request) {
-	r.Body = http.MaxBytesReader(w, r.Body, s.Config.MaxRequest)
-	if err := r.ParseMultipartForm(s.Config.MaxFileSize); err != nil {
-		var maxErr *http.MaxBytesError
-		if errors.As(err, &maxErr) {
-			writeError(w, 413, uploadTooLargeMessage)
-		} else {
-			writeError(w, 400, "Upload request is invalid.")
-		}
-		return
-	}
-	file, header, err := r.FormFile("file")
-	if err != nil {
-		writeError(w, 400, "Tidak ada berkas foto yang diunggah.")
-		return
-	}
-	defer file.Close()
-	path, err := storeUploadedImage(s.Config.UploadDir, s.Config.MaxFileSize, header, file)
-	if err != nil {
-		status := 400
-		message := err.Error()
-		if errors.Is(err, errUploadTooLarge) {
-			// Spring's multipart parser rejects the part before the controller
-			// runs, so its MaxUploadSizeExceededException message is the one
-			// Java actually answers with.
-			status, message = 413, uploadTooLargeMessage
-		}
-		writeError(w, status, message)
-		return
-	}
-	writeJSON(w, 200, map[string]string{"url": path})
-}
-
-const uploadTooLargeMessage = "Ukuran berkas melebihi batas yang diizinkan."
-
-var errUploadTooLarge = errors.New("upload too large")
-
-func storeUploadedImage(root string, max int64, header *multipart.FileHeader, file multipart.File) (string, error) {
-	if header.Size < 1 {
-		return "", fmt.Errorf("Tidak ada berkas foto yang diunggah.")
-	}
-	if header.Size > max {
-		return "", errUploadTooLarge
-	}
-	name := filepath.Base(header.Filename)
-	dot := strings.LastIndex(name, ".")
-	if dot < 0 || dot == len(name)-1 {
-		return "", fmt.Errorf("Ekstensi berkas foto tidak valid.")
-	}
-	ext := strings.ToLower(name[dot:])
-	if ext != ".jpg" && ext != ".jpeg" && ext != ".png" && ext != ".webp" {
-		return "", fmt.Errorf("Format foto harus JPG, PNG, atau WebP.")
-	}
-	tmp, err := os.CreateTemp("", "elvove-image-")
-	if err != nil {
-		return "", fmt.Errorf("Upload failed.")
-	}
-	tmpPath := tmp.Name()
-	defer os.Remove(tmpPath)
-	limited := io.LimitReader(file, max+1)
-	size, err := io.Copy(tmp, limited)
-	if err != nil {
-		tmp.Close()
-		return "", fmt.Errorf("Upload failed.")
-	}
-	if size > max {
-		tmp.Close()
-		return "", errUploadTooLarge
-	}
-	if err = tmp.Close(); err != nil {
-		return "", fmt.Errorf("Upload failed.")
-	}
-	if !validImageSignature(tmpPath, ext) {
-		return "", fmt.Errorf("Berkas bukan gambar JPG, PNG, atau WebP yang valid.")
-	}
-	if err = os.MkdirAll(filepath.Join(root, "originals"), 0750); err != nil {
-		return "", fmt.Errorf("Upload failed.")
-	}
-	if err = os.MkdirAll(filepath.Join(root, "thumbnails"), 0750); err != nil {
-		return "", fmt.Errorf("Upload failed.")
-	}
-	if err = os.MkdirAll(filepath.Join(root, "previews"), 0750); err != nil {
-		return "", fmt.Errorf("Upload failed.")
-	}
-	id := newUploadID()
-	source := filepath.Join(root, "originals", id+ext)
-	if err = copyFile(tmpPath, source); err != nil {
-		return "", fmt.Errorf("Upload failed.")
-	}
-	if err = convertWebP(source, filepath.Join(root, "thumbnails", id+".webp"), 800, 55); err != nil {
-		removeUploadVariants(root, "/uploads/"+id+ext)
-		return "", fmt.Errorf("Foto gagal diproses. Pastikan berkas adalah gambar yang valid.")
-	}
-	if err = convertWebP(source, filepath.Join(root, "previews", id+".webp"), 1200, 65); err != nil {
-		removeUploadVariants(root, "/uploads/"+id+ext)
-		_ = os.Remove(source)
-		return "", fmt.Errorf("Foto gagal diproses. Pastikan berkas adalah gambar yang valid.")
-	}
-	return "/uploads/thumbnails/" + id + ".webp", nil
-}
-func validImageSignature(path, ext string) bool {
-	file, err := os.Open(path)
-	if err != nil {
-		return false
-	}
-	defer file.Close()
-	var header [12]byte
-	n, _ := file.Read(header[:])
-	jpeg := n >= 3 && header[0] == 0xff && header[1] == 0xd8 && header[2] == 0xff
-	png := n >= 8 && header[0] == 0x89 && string(header[1:4]) == "PNG" && header[4] == 0x0d && header[5] == 0x0a && header[6] == 0x1a && header[7] == 0x0a
-	webp := n >= 12 && string(header[0:4]) == "RIFF" && string(header[8:12]) == "WEBP"
-	switch ext {
-	case ".jpg", ".jpeg":
-		return jpeg
-	case ".png":
-		return png
-	case ".webp":
-		return webp
-	}
-	return false
-}
-func newUploadID() string {
-	var b [16]byte
-	if _, err := rand.Read(b[:]); err != nil {
-		return strconv.FormatInt(time.Now().UnixNano(), 36)
-	}
-	return hex.EncodeToString(b[:])
-}
-func copyFile(source, destination string) error {
-	in, err := os.Open(source)
-	if err != nil {
-		return err
-	}
-	defer in.Close()
-	out, err := os.OpenFile(destination, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0640)
-	if err != nil {
-		return err
-	}
-	_, copyErr := io.Copy(out, in)
-	closeErr := out.Close()
-	if copyErr != nil {
-		return copyErr
-	}
-	return closeErr
-}
-func convertWebP(source, destination string, width, quality int) error {
-	ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "cwebp", "-quiet", "-resize", strconv.Itoa(width), "0", "-q", strconv.Itoa(quality), source, "-o", destination)
-	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("webp conversion failed: %s", strings.TrimSpace(string(out)))
-	}
-	info, err := os.Stat(destination)
-	if err != nil || info.Size() == 0 {
-		return fmt.Errorf("webp output missing")
-	}
-	return nil
-}
-
 func (s *Server) deletePackage(w http.ResponseWriter, r *http.Request) {
 	id, e := strconv.ParseInt(r.PathValue("id"), 10, 64)
 	if e != nil || id < 1 {
@@ -1700,9 +1122,10 @@ func (s *Server) transitionBooking(w http.ResponseWriter, r *http.Request, id in
 	}
 	// The schedule is locked once the customer has agreed to it: an ACCEPTED
 	// booking only moves forward to COMPLETED, and a COMPLETED one does not move
-	// at all. A reschedule therefore has to start while the booking is still
-	// waiting for a decision.
-	allowed := map[string][]string{"PENDING": {"ACCEPTED", "RESCHEDULE_REQUESTED"}, "ACCEPTED": {"COMPLETED"}, "RESCHEDULE_REQUESTED": {"ACCEPTED", "COMPLETED"}}
+	// at all. A reschedule has to start while the booking is still waiting for a
+	// decision, and once a new schedule is proposed the booking must pass through
+	// ACCEPTED again before it can be completed.
+	allowed := map[string][]string{"PENDING": {"ACCEPTED", "RESCHEDULE_REQUESTED"}, "ACCEPTED": {"COMPLETED"}, "RESCHEDULE_REQUESTED": {"ACCEPTED"}}
 	valid := false
 	for _, next := range allowed[current] {
 		if next == target {
@@ -1713,8 +1136,15 @@ func (s *Server) transitionBooking(w http.ResponseWriter, r *http.Request, id in
 		writeError(w, 400, fmt.Sprintf(`Status pemesanan tidak dapat diubah dari "%s" menjadi "%s".`, statusLabel(current), statusLabel(target)))
 		return false
 	}
-	if _, err := s.Store.Exec(r.Context(), `UPDATE bookings SET status=$1,updated_at=NOW() WHERE id=$2`, target, id); err != nil {
+	// The compare-and-set keeps a status another admin changed a moment ago from
+	// being overwritten: only the transition read above may be written.
+	affected, err := s.Store.Exec(r.Context(), `UPDATE bookings SET status=$1,updated_at=NOW() WHERE id=$2 AND status=$3`, target, id, current)
+	if err != nil {
 		writeError(w, 500, "Booking could not be updated.")
+		return false
+	}
+	if affected == 0 {
+		writeError(w, 409, "Status pemesanan baru saja diubah. Muat ulang daftar lalu coba lagi.")
 		return false
 	}
 	booking, err := s.fetchBooking(r, id)
@@ -1735,9 +1165,12 @@ func (s *Server) transitionBooking(w http.ResponseWriter, r *http.Request, id in
 // fetchBooking loads one booking in the same shape getBookings returns, so a
 // single-record response matches the list contract.
 func (s *Server) fetchBooking(r *http.Request, id int64) (map[string]any, error) {
-	rows, err := s.Store.QueryRows(r.Context(), bookingColumns+` WHERE id=$1`, id)
-	if err != nil || len(rows) == 0 {
-		return nil, fmt.Errorf("booking %d could not be loaded", id)
+	rows, err := s.Store.QueryRows(r.Context(), bookingDetailColumns+` WHERE id=$1`, id)
+	if err != nil {
+		return nil, err
+	}
+	if len(rows) == 0 {
+		return nil, pgx.ErrNoRows
 	}
 	normalizeBooking(rows[0])
 	return rows[0], nil
@@ -1839,7 +1272,38 @@ func (s *Server) deleteBooking(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 400, "Invalid resource id.")
 		return
 	}
+	// Read what has to be cleaned up before the row goes: afterwards there is
+	// no folder id or token left to name it.
+	var folderID, token string
+	if err := s.Store.Pool.QueryRow(r.Context(),
+		`SELECT COALESCE(raw_folder_id,''), COALESCE(selection_token,'')
+			FROM bookings WHERE id=$1`, id).Scan(&folderID, &token); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		writeError(w, 500, "Database operation failed.")
+		return
+	}
 	if _, ok := s.execAdmin(w, r, "Booking", id, `DELETE FROM bookings WHERE id=$1`, id); ok {
+		// The folder goes to the trash rather than being destroyed, so a booking
+		// removed by mistake does not take the client's photos with it.
+		s.trashBookingFolder(r.Context(), folderID)
+		if token != "" {
+			os.RemoveAll(filepath.Join(s.Config.UploadDir, "gallery", token))
+		}
 		writeEmpty(w, 204)
+	}
+}
+
+// trashBookingFolder moves a booking's Drive folder to the trash. A Drive that
+// is not connected, or a folder somebody already removed, is not an error: the
+// booking is gone either way, and the log keeps the reason.
+func (s *Server) trashBookingFolder(ctx context.Context, folderID string) {
+	if folderID == "" {
+		return
+	}
+	client := s.driveClientFor(ctx)
+	if !client.Enabled() {
+		return
+	}
+	if err := client.Trash(ctx, folderID); err != nil {
+		log.Printf("drive trash booking folder %s: %v", folderID, err)
 	}
 }

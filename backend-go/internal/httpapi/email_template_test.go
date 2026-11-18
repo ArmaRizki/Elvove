@@ -495,10 +495,78 @@ func TestRenderBookingSettlement(t *testing.T) {
 			t.Errorf("text missing marker %q", marker)
 		}
 	}
-	for _, absent := range []string{"PILIH FOTO UNTUK DIEDIT", "https://elvove.site/pilih/"} {
-		if strings.Contains(html, absent) {
-			t.Errorf("without a raw folder the notice must not offer a selection link, found %q", absent)
+	// The selection link has its own notice now, sent before this one, so the
+	// settlement e-mail must stay a request for money only.
+	for _, absent := range []string{"PILIH FOTO UNTUK DIEDIT", "https://elvove.site/pilih/", "FOTO SESI ANDA"} {
+		if strings.Contains(html, absent) || strings.Contains(text, absent) {
+			t.Errorf("the settlement notice must not carry the selection link, found %q", absent)
 		}
+	}
+}
+
+// The selection notice opens the client page: the photos are ready and the ones
+// to edit are chosen there, before the balance is asked for.
+func TestRenderBookingSelection(t *testing.T) {
+	invoice := invoiceDetails{
+		Number:         "INV-2026-0014",
+		IssuedAt:       "2026-11-16",
+		GalleryURL:     "https://elvove.site/pilih/abc123",
+		SelectionLimit: 10,
+	}
+	subject, html, text := renderBookingSelection(sampleBooking(), invoice, "Elvove", "081234567890", "https://elvove.site")
+
+	if subject != "Pilih Foto untuk Diedit — Elvove" {
+		t.Errorf("subject = %q", subject)
+	}
+	for _, marker := range []string{
+		`>PILIH FOTO</td>`,
+		`PILIH FOTO UNTUK DIEDIT`,
+		`PILIH FOTO SEKARANG`,
+		`https://elvove.site/pilih/abc123`,
+		`Pilih maksimal 10 foto`,
+		`CARA MEMILIH`,
+		`wa.me/6281234567890`,
+	} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("html missing marker %q", marker)
+		}
+	}
+	for _, marker := range []string{
+		"PILIH FOTO\n\n",
+		"https://elvove.site/pilih/abc123",
+		"Pilih maksimal 10 foto",
+		"CARA MEMILIH",
+	} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("text missing marker %q", marker)
+		}
+	}
+	// The notice is about the photos, so it must not ask for money.
+	for _, absent := range []string{"Rp1.000.000", "SISA PEMBAYARAN", "CARA MELUNASI"} {
+		if strings.Contains(html, absent) || strings.Contains(text, absent) {
+			t.Errorf("the selection notice must not ask for payment, found %q", absent)
+		}
+	}
+}
+
+// A package whose quota is still zero gets a link that only shows the photos.
+// Promising a choice the page refuses would read as a broken e-mail.
+func TestRenderBookingSelectionWithoutAQuota(t *testing.T) {
+	invoice := invoiceDetails{GalleryURL: "https://elvove.site/pilih/def456"}
+	_, html, text := renderBookingSelection(sampleBooking(), invoice, "Elvove", "", "https://elvove.site")
+
+	for _, marker := range []string{"https://elvove.site/pilih/def456", "FOTO SESI ANDA", "LIHAT FOTO"} {
+		if !strings.Contains(html, marker) {
+			t.Errorf("html missing marker %q", marker)
+		}
+	}
+	for _, marker := range []string{"https://elvove.site/pilih/def456", "FOTO SESI ANDA"} {
+		if !strings.Contains(text, marker) {
+			t.Errorf("text missing marker %q", marker)
+		}
+	}
+	if strings.Contains(text, "PILIH FOTO UNTUK DIEDIT") || strings.Contains(text, "CARA MEMILIH") {
+		t.Error("without a quota the notice must not ask for a choice")
 	}
 }
 
@@ -506,36 +574,20 @@ func TestRenderBookingSettlement(t *testing.T) {
 // Then the day before the session is in the past and a deadline would be wrong.
 func TestRenderBookingSettlementAfterSession(t *testing.T) {
 	invoice := invoiceDetails{
-		Number:         "INV-2026-0012",
-		IssuedAt:       "2026-11-16",
-		DownPaidAt:     "2026-11-10",
-		GalleryURL:     "https://elvove.site/pilih/abc123",
-		SelectionLimit: 30,
+		Number:     "INV-2026-0012",
+		IssuedAt:   "2026-11-16",
+		DownPaidAt: "2026-11-10",
 	}
 	_, html, text := renderBookingSettlement(sampleBooking(), invoice, "Elvove", "081234567890", "https://elvove.site")
 
 	if strings.Contains(text, "paling lambat 8 November 2026") {
 		t.Error("a notice sent after the session must not claim a deadline in the past")
 	}
-	for _, marker := range []string{
-		"secepatnya",
-		"PILIH FOTO UNTUK DIEDIT",
-		"Pilih maksimal 30 foto",
-		"https://elvove.site/pilih/abc123",
-	} {
-		if !strings.Contains(text, marker) {
-			t.Errorf("text missing marker %q", marker)
-		}
+	if !strings.Contains(text, "secepatnya") {
+		t.Error("a notice sent after the session must ask for the balance at once")
 	}
-	for _, marker := range []string{
-		`PILIH FOTO UNTUK DIEDIT`,
-		`PILIH FOTO SEKARANG`,
-		`https://elvove.site/pilih/abc123`,
-		`Pilih maksimal 30 foto`,
-	} {
-		if !strings.Contains(html, marker) {
-			t.Errorf("html missing marker %q", marker)
-		}
+	if !strings.Contains(html, "SISA PEMBAYARAN") {
+		t.Error("html missing the payment panel")
 	}
 }
 
@@ -543,20 +595,29 @@ func TestEmailSelectionNote(t *testing.T) {
 	if got := emailSelectionNote(10); got != "Pilih maksimal 10 foto yang ingin Anda minta untuk diedit." {
 		t.Errorf("emailSelectionNote = %q", got)
 	}
-	if got := emailSelectionNote(0); !strings.Contains(got, "Pilih foto") {
+	// Without a quota the page cannot accept a choice, so the note must not
+	// promise one.
+	if got := emailSelectionNote(0); strings.Contains(got, "Pilih maksimal") || got == "" {
 		t.Errorf("emailSelectionNote without a limit = %q", got)
+	}
+	if got := emailSelectionTitle(0); got != "FOTO SESI ANDA" {
+		t.Errorf("emailSelectionTitle without a limit = %q", got)
+	}
+	if got := emailSelectionButton(0); got != "LIHAT FOTO" {
+		t.Errorf("emailSelectionButton without a limit = %q", got)
 	}
 }
 
-// A package without a photo quota gets no link: there is nothing to pick.
-func TestSettlementLinkNeedsAQuota(t *testing.T) {
-	b := mailBooking{SelectionToken: "abc123", SelectionLimit: 0}
-	if got := b.selectionLink("https://elvove.site"); got != "" {
-		t.Errorf("selectionLink without a quota = %q, want empty", got)
-	}
-	b.SelectionLimit = 10
+// The link goes out with every booking that has a token, quota or not: the page
+// says what the package allows, and a dropped link is invisible to the admin.
+func TestSettlementLinkFollowsTheToken(t *testing.T) {
+	b := mailBooking{SelectionToken: "abc123"}
 	if got := b.selectionLink("https://elvove.site/"); got != "https://elvove.site/pilih/abc123" {
 		t.Errorf("selectionLink = %q", got)
+	}
+	b.SelectionLimit = 10
+	if got := b.selectionLink("https://elvove.site"); got != "https://elvove.site/pilih/abc123" {
+		t.Errorf("selectionLink with a quota = %q", got)
 	}
 	b.SelectionToken = ""
 	if got := b.selectionLink("https://elvove.site"); got != "" {

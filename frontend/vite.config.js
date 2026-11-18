@@ -9,6 +9,12 @@ export default defineConfig({
     port: 5173,
     allowedHosts: [
       'elvove.site',
+      // The local nginx proxies with the browser's Host header, so the dev
+      // server has to accept it too or every page answers 502.
+      'localhost:8090',
+      'localhost',
+      'frontend',
+      'frontend:5173',
     ],
   },
 })

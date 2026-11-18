@@ -5,8 +5,16 @@ const AuthContext = createContext(null);
 
 export function AuthProvider({ children }) {
   const [admin, setAdmin] = useState(() => {
-    const stored = localStorage.getItem("admin_user");
-    return stored ? JSON.parse(stored) : null;
+    // A value that is not JSON (an old version, a manual edit) must not blank
+    // the whole site: the parse failure is swallowed and the key removed.
+    try {
+      const stored = localStorage.getItem("admin_user");
+      return stored ? JSON.parse(stored) : null;
+    } catch {
+      localStorage.removeItem("admin_user");
+      localStorage.removeItem("admin_token");
+      return null;
+    }
   });
 
   const login = async (username, password) => {

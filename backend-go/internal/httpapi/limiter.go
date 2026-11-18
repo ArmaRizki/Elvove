@@ -27,6 +27,12 @@ type RateLimiter struct {
 	lastSweep time.Time
 }
 
+// NewRateLimiter builds the in-memory limiter.
+//
+// shortcut: the counters live in this process's memory, so a restart clears
+// every login lock and a second backend process would count separately. Fine
+// for one process and one admin; move the counters into Postgres when either
+// stops being true.
 func NewRateLimiter() *RateLimiter {
 	return &RateLimiter{counters: make(map[string]*counter), lastSweep: time.Now()}
 }

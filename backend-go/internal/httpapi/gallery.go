@@ -26,7 +26,7 @@ import (
 // The raw photos stay in the Drive folder the photographer already uses. This
 // page only needs a list of them, a WebP preview of each, and the ids the client
 // picked: the previews are uploaded to a "webp" subfolder next to the originals,
-// and the picked originals are copied into a "mustedit" folder. Nothing is moved
+// and the picked originals are copied into the "foto terpilih" folder. Nothing is moved
 // or deleted, so a wrong pick never loses a photo.
 //
 // The page is opened with a per-booking token, and it only exists once the admin
@@ -43,25 +43,34 @@ func newSelectionToken() string {
 	return hex.EncodeToString(b[:])
 }
 
-// driveClient is nil when the OAuth credentials are missing; every gallery
-// endpoint checks Enabled() and says so instead of failing on a nil pointer.
-func (s *Server) driveClient() *drive.Client {
-	return s.Drive
-}
-
 // galleryBooking is the booking behind one selection link.
 type galleryBooking struct {
-	ID              int64
-	Name            string
-	PackageTitle    string
-	Limit           int
-	RawFolderID     string
-	SelectionFolder string
-	SubmittedAt     string
+	ID           int64
+	Name         string
+	PackageTitle string
+	Limit        int
+	RawFolderID  string
+	WebpFolderID string
+	MusteditID   string
+	SubmittedAt  string
+}
+
+// selectionLimitSQL is the one rule for the photo quota: the snapshot taken
+// when the booking was made, and the package's quota when that snapshot is
+// empty. The client page, the e-mail and the admin panel all use it, so they
+// cannot disagree about how many photos the client may pick.
+//
+// The alias is the bookings table as it is written in the query.
+func selectionLimitSQL(alias string) string {
+	return `COALESCE(NULLIF(` + alias + `.selection_limit,0), (SELECT p.photo_selection_limit FROM packages p WHERE p.title = ` + alias + `.package_title ORDER BY p.id LIMIT 1), 0)`
 }
 
 // loadGalleryBooking reads the booking by token. A malformed token never reaches
 // the database: it cannot match, so the query would be wasted work.
+//
+// A booking made before packages carried a quota holds 0 in its snapshot, which
+// would close its page for good. NULLIF lets such a booking fall back to the
+// package's quota; a package that really offers no selection still answers 0.
 func (s *Server) loadGalleryBooking(w http.ResponseWriter, r *http.Request, token string) (galleryBooking, bool) {
 	var b galleryBooking
 	if !selectionTokenPattern.MatchString(token) {
@@ -69,11 +78,12 @@ func (s *Server) loadGalleryBooking(w http.ResponseWriter, r *http.Request, toke
 		return b, false
 	}
 	err := s.Store.Pool.QueryRow(r.Context(), `SELECT b.id, b.name, COALESCE(b.package_title,''),
-			COALESCE(b.selection_limit, (SELECT p.photo_selection_limit FROM packages p WHERE p.title = b.package_title ORDER BY p.id LIMIT 1), 0),
-			COALESCE(b.raw_folder_id,''), COALESCE(b.selection_folder_id,''),
+			`+selectionLimitSQL("b")+`,
+			COALESCE(b.raw_folder_id,''),
+			COALESCE(b.folder_webp_id,''), COALESCE(b.folder_mustedit_id,''),
 			COALESCE(to_char(b.selection_submitted_at,'YYYY-MM-DD"T"HH24:MI:SS'),'')
 		FROM bookings b WHERE b.selection_token = $1`, token).
-		Scan(&b.ID, &b.Name, &b.PackageTitle, &b.Limit, &b.RawFolderID, &b.SelectionFolder, &b.SubmittedAt)
+		Scan(&b.ID, &b.Name, &b.PackageTitle, &b.Limit, &b.RawFolderID, &b.WebpFolderID, &b.MusteditID, &b.SubmittedAt)
 	if errors.Is(err, pgx.ErrNoRows) {
 		writeNotFound(w)
 		return b, false
@@ -88,26 +98,78 @@ func (s *Server) loadGalleryBooking(w http.ResponseWriter, r *http.Request, toke
 
 // galleryPhotos refreshes the cached list from Drive, then returns it. New files
 // appear, deleted ones disappear.
-func (s *Server) galleryPhotos(r *http.Request, booking galleryBooking) ([]drive.File, error) {
-	files, err := s.Drive.ListImages(r.Context(), booking.RawFolderID)
+func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking galleryBooking) ([]drive.File, error) {
+	// A reload, or the same page opened twice, reuses the listing for a minute
+	// instead of walking the folder tree again.
+	s.galleryListMu.Lock()
+	for id, entry := range s.galleryListed {
+		if time.Since(entry.at) >= listingTTL {
+			delete(s.galleryListed, id)
+		}
+	}
+	cached, ok := s.galleryListed[booking.RawFolderID]
+	s.galleryListMu.Unlock()
+	if ok {
+		// The rows are per booking, so they are synced even on a cache hit: a
+		// second booking on the same folder would otherwise never get them.
+		return cached.files, s.syncBookingPhotos(r.Context(), booking.ID, cached.files)
+	}
+	// The photographer sorts the photos into subfolders, so the whole tree is
+	// read. The three folders the site keeps for itself are left out.
+	files, err := client.ListImagesRecursive(r.Context(), booking.RawFolderID, webpFolderName, pickedFolderName, editedFolderName)
 	if err != nil {
 		return nil, err
 	}
-	ids := make([]string, 0, len(files))
-	for _, f := range files {
-		ids = append(ids, f.ID)
-		if _, err := s.Store.Exec(r.Context(), `INSERT INTO booking_photos(booking_id,drive_file_id,file_name,width,height) VALUES($1,$2,$3,$4,$5)
-			ON CONFLICT (booking_id,drive_file_id) DO UPDATE SET file_name=EXCLUDED.file_name,width=EXCLUDED.width,height=EXCLUDED.height,updated_at=NOW()`,
-			booking.ID, f.ID, f.Name, nullableInt(f.Width), nullableInt(f.Height)); err != nil {
-			return nil, err
-		}
-	}
-	// A photo the photographer removed from the folder must also leave the page.
-	if _, err := s.Store.Exec(r.Context(), `DELETE FROM booking_photos WHERE booking_id=$1 AND NOT (drive_file_id = ANY($2))`, booking.ID, ids); err != nil {
+	if err := s.syncBookingPhotos(r.Context(), booking.ID, files); err != nil {
 		return nil, err
 	}
+	s.galleryListMu.Lock()
+	s.galleryListed[booking.RawFolderID] = galleryListing{files: files, at: time.Now()}
+	s.galleryListMu.Unlock()
 	return files, nil
 }
+
+// syncBookingPhotos records one folder listing for one booking: files that are
+// new are added, ones that left the folder are dropped unless the client picked
+// them. The Drive listing itself may be shared with another booking; these rows
+// may not.
+func (s *Server) syncBookingPhotos(ctx context.Context, bookingID int64, files []drive.File) error {
+	ids := make([]string, 0, len(files))
+	names := make([]string, 0, len(files))
+	widths := make([]int32, 0, len(files))
+	heights := make([]int32, 0, len(files))
+	for _, f := range files {
+		ids = append(ids, f.ID)
+		names = append(names, f.Name)
+		widths = append(widths, int32(f.Width))
+		heights = append(heights, int32(f.Height))
+	}
+	if len(ids) > 0 {
+		// One query for the whole folder, not one per photo.
+		if _, err := s.Store.Exec(ctx, `INSERT INTO booking_photos(booking_id,drive_file_id,file_name,width,height)
+			SELECT $1, u.id, u.name, NULLIF(u.width,0), NULLIF(u.height,0)
+			FROM unnest($2::text[], $3::text[], $4::int[], $5::int[]) AS u(id,name,width,height)
+			ON CONFLICT (booking_id,drive_file_id) DO UPDATE SET file_name=EXCLUDED.file_name,width=EXCLUDED.width,height=EXCLUDED.height,updated_at=NOW()`,
+			bookingID, ids, names, widths, heights); err != nil {
+			return err
+		}
+	}
+	// A photo the photographer removed from the folder leaves the page, but a
+	// photo the client already picked stays: that choice is not the
+	// photographer's to erase.
+	_, err := s.Store.Exec(ctx, `DELETE FROM booking_photos WHERE booking_id=$1 AND NOT selected AND NOT (drive_file_id = ANY($2))`, bookingID, ids)
+	return err
+}
+
+// galleryListing is one raw folder's Drive listing, kept for listingTTL.
+type galleryListing struct {
+	files []drive.File
+	at    time.Time
+}
+
+// listingTTL is how long a listing is reused. A photo added to the folder shows
+// up on the client page within this window.
+const listingTTL = time.Minute
 
 // getGallery answers what the client page needs: the photos, the entitlement and
 // what is already picked. Previews are converted lazily by galleryPhoto, so this
@@ -121,11 +183,12 @@ func (s *Server) getGallery(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Foto untuk pemesanan ini belum siap. Silakan hubungi Elvove.")
 		return
 	}
-	if !s.driveClient().Enabled() {
+	client := s.driveClientFor(r.Context())
+	if !client.Enabled() {
 		writeError(w, 503, "Halaman foto sedang tidak tersedia. Silakan hubungi Elvove.")
 		return
 	}
-	files, err := s.galleryPhotos(r, booking)
+	files, err := s.galleryPhotos(r, client, booking)
 	if err != nil {
 		log.Printf("gallery list booking %d: %v", booking.ID, err)
 		writeError(w, 502, "Folder foto tidak dapat dibaca. Silakan hubungi Elvove.")
@@ -177,7 +240,8 @@ func (s *Server) galleryPhoto(w http.ResponseWriter, r *http.Request) {
 	if !ok {
 		return
 	}
-	if booking.RawFolderID == "" || !s.driveClient().Enabled() {
+	client := s.driveClientFor(r.Context())
+	if booking.RawFolderID == "" || !client.Enabled() {
 		writeNotFound(w)
 		return
 	}
@@ -193,16 +257,20 @@ func (s *Server) galleryPhoto(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 500, "Foto tidak dapat dibuka.")
 		return
 	}
-	// Previews live under UPLOAD_DIR, which is the persistent volume, so they
-	// survive a redeploy and Drive is read once per photo. The folder is not
-	// pruned automatically: delete gallery/<token> once a booking's edit is
-	// delivered if the volume gets tight.
+	// Previews live under UPLOAD_DIR, so they survive a redeploy and Drive is
+	// read once per photo. The folder is not pruned automatically: delete
+	// gallery/<token> once a booking's edit is delivered if the volume gets
+	// tight.
 	cache := filepath.Join(s.Config.UploadDir, "gallery", token, fileID+".webp")
+	// The full-size original is written under "originals", which the uploads
+	// handler never serves: otherwise the client could download the untouched
+	// photo while the preview is being made.
+	original := filepath.Join(s.Config.UploadDir, "originals", "gallery", token, fileID+".source")
 	data, err := os.ReadFile(cache)
 	if err != nil {
 		// One conversion per photo even when the grid fires six requests at once.
 		unlock := s.galleryLock(token + "/" + fileID)
-		data, webpID, err = s.convertGalleryPhoto(r.Context(), booking, fileID, name, webpID, cache)
+		data, webpID, err = s.convertGalleryPhoto(r.Context(), client, booking, fileID, name, webpID, cache, original)
 		unlock()
 		if err != nil {
 			log.Printf("gallery convert %d/%s: %v", booking.ID, fileID, err)
@@ -219,17 +287,18 @@ func (s *Server) galleryPhoto(w http.ResponseWriter, r *http.Request) {
 // convertGalleryPhoto downloads the original, scales it into a WebP, stores it in
 // the Drive "webp" subfolder and caches it on disk. Drive is asked only once per
 // photo: after that the local copy answers.
-func (s *Server) convertGalleryPhoto(ctx context.Context, booking galleryBooking, fileID, name, webpID, cache string) ([]byte, string, error) {
-	body, err := s.Drive.Download(ctx, fileID)
+func (s *Server) convertGalleryPhoto(ctx context.Context, client *drive.Client, booking galleryBooking, fileID, name, webpID, cache, original string) ([]byte, string, error) {
+	body, err := client.Download(ctx, fileID)
 	if err != nil {
 		return nil, webpID, err
 	}
 	defer body.Close()
-	dir := filepath.Dir(cache)
-	if err := os.MkdirAll(dir, 0750); err != nil {
+	if err := os.MkdirAll(filepath.Dir(cache), 0750); err != nil {
 		return nil, webpID, err
 	}
-	original := strings.TrimSuffix(cache, ".webp") + ".source"
+	if err := os.MkdirAll(filepath.Dir(original), 0750); err != nil {
+		return nil, webpID, err
+	}
 	out, err := os.OpenFile(original, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0640)
 	if err != nil {
 		return nil, webpID, err
@@ -254,14 +323,24 @@ func (s *Server) convertGalleryPhoto(ctx context.Context, booking galleryBooking
 		return nil, webpID, err
 	}
 	if webpID == "" {
-		folder, folderErr := s.Drive.EnsureFolder(ctx, booking.RawFolderID, "webp")
-		if folderErr != nil {
+		if booking.WebpFolderID != "" {
+			// The folder was made with the booking; only a deleted one has to be
+			// looked up again.
+			if _, folderErr := client.Folder(ctx, booking.WebpFolderID); folderErr != nil {
+				booking.WebpFolderID = ""
+			}
+		}
+		folder := booking.WebpFolderID
+		if folder == "" {
+			folder, err = client.EnsureFolder(ctx, booking.RawFolderID, webpFolderName)
+		}
+		if err != nil {
 			// The preview still works; only the Drive copy is missing, so the next
 			// request retries instead of failing the page.
-			log.Printf("gallery webp folder booking %d: %v", booking.ID, folderErr)
+			log.Printf("gallery webp folder booking %d: %v", booking.ID, err)
 			return data, webpID, nil
 		}
-		uploaded, uploadErr := s.Drive.Upload(ctx, folder, strings.TrimSuffix(name, filepath.Ext(name))+".webp", "image/webp", data)
+		uploaded, uploadErr := client.Upload(ctx, folder, strings.TrimSuffix(name, filepath.Ext(name))+".webp", "image/webp", data)
 		if uploadErr != nil {
 			log.Printf("gallery webp upload booking %d: %v", booking.ID, uploadErr)
 			return data, webpID, nil
@@ -320,18 +399,51 @@ func (s *Server) saveSelection(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 	}
+	// Two tabs saving at once would each compare against the same snapshot and
+	// together exceed the quota, so one save runs per booking at a time.
+	unlock := s.galleryLock(fmt.Sprintf("select/%d", booking.ID))
+	defer unlock()
+	// The page sends the whole picked set on every click, so only the rows that
+	// actually change are written: one click is one row, not the whole folder.
+	want := make(map[string]int, len(req.FileIDs))
+	for i, id := range req.FileIDs {
+		want[id] = i + 1
+	}
+	current := map[string]int{}
+	rows, err := s.Store.Pool.Query(r.Context(), `SELECT drive_file_id, COALESCE(position,0) FROM booking_photos WHERE booking_id=$1 AND selected`, booking.ID)
+	if err != nil {
+		writeError(w, 500, "Pilihan foto tidak dapat disimpan.")
+		return
+	}
+	for rows.Next() {
+		var id string
+		var position int
+		if err := rows.Scan(&id, &position); err == nil {
+			current[id] = position
+		}
+	}
+	rows.Close()
+
 	tx, err := s.Store.Pool.Begin(r.Context())
 	if err != nil {
 		writeError(w, 500, "Pilihan foto tidak dapat disimpan.")
 		return
 	}
 	defer tx.Rollback(r.Context())
-	if _, err := tx.Exec(r.Context(), `UPDATE booking_photos SET selected=FALSE,position=NULL,updated_at=NOW() WHERE booking_id=$1`, booking.ID); err != nil {
-		writeError(w, 500, "Pilihan foto tidak dapat disimpan.")
-		return
+	for id, position := range current {
+		if next, ok := want[id]; ok && next == position {
+			continue
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE booking_photos SET selected=FALSE,position=NULL,updated_at=NOW() WHERE booking_id=$1 AND drive_file_id=$2`, booking.ID, id); err != nil {
+			writeError(w, 500, "Pilihan foto tidak dapat disimpan.")
+			return
+		}
 	}
-	for i, id := range req.FileIDs {
-		if _, err := tx.Exec(r.Context(), `UPDATE booking_photos SET selected=TRUE,position=$1,updated_at=NOW() WHERE booking_id=$2 AND drive_file_id=$3`, i+1, booking.ID, id); err != nil {
+	for id, position := range want {
+		if old, ok := current[id]; ok && old == position {
+			continue
+		}
+		if _, err := tx.Exec(r.Context(), `UPDATE booking_photos SET selected=TRUE,position=$1,updated_at=NOW() WHERE booking_id=$2 AND drive_file_id=$3`, position, booking.ID, id); err != nil {
 			writeError(w, 500, "Pilihan foto tidak dapat disimpan.")
 			return
 		}
@@ -345,7 +457,7 @@ func (s *Server) saveSelection(w http.ResponseWriter, r *http.Request) {
 
 var selectionFileIDPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{10,100}$`)
 
-// submitSelection closes the choice: it creates the "mustedit" folder beside the
+// submitSelection closes the choice: it creates the "foto terpilih" folder beside the
 // originals and copies the picked full-resolution files into it. Copying rather
 // than moving means the raw folder stays intact whatever happens.
 func (s *Server) submitSelection(w http.ResponseWriter, r *http.Request) {
@@ -357,7 +469,8 @@ func (s *Server) submitSelection(w http.ResponseWriter, r *http.Request) {
 		writeError(w, 409, "Pilihan foto sudah dikirim.")
 		return
 	}
-	if !s.driveClient().Enabled() {
+	client := s.driveClientFor(r.Context())
+	if !client.Enabled() {
 		writeError(w, 503, "Halaman foto sedang tidak tersedia. Silakan hubungi Elvove.")
 		return
 	}
@@ -401,17 +514,26 @@ func (s *Server) submitSelection(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	folder, err := s.Drive.EnsureFolder(r.Context(), booking.RawFolderID, "mustedit")
+	folder := booking.MusteditID
+	if folder != "" {
+		// The folder was made with the booking; only a deleted one is recreated.
+		if _, folderErr := client.Folder(r.Context(), folder); folderErr != nil {
+			folder = ""
+		}
+	}
+	if folder == "" {
+		folder, err = client.EnsureFolder(r.Context(), booking.RawFolderID, pickedFolderName)
+	}
 	if err != nil {
-		log.Printf("gallery mustedit folder booking %d: %v", booking.ID, err)
+		log.Printf("gallery picked folder booking %d: %v", booking.ID, err)
 		writeError(w, 502, "Folder hasil edit tidak dapat dibuat. Silakan hubungi Elvove.")
 		return
 	}
 	// A retry after a partial failure must not copy the same photo twice, so the
 	// folder is read first and names already there are skipped.
-	existing, err := s.Drive.ListImages(r.Context(), folder)
+	existing, err := client.ListImages(r.Context(), folder)
 	if err != nil {
-		log.Printf("gallery mustedit list booking %d: %v", booking.ID, err)
+		log.Printf("gallery picked list booking %d: %v", booking.ID, err)
 		writeError(w, 502, "Folder hasil edit tidak dapat dibaca. Silakan hubungi Elvove.")
 		return
 	}
@@ -422,99 +544,76 @@ func (s *Server) submitSelection(w http.ResponseWriter, r *http.Request) {
 	for _, f := range existing {
 		already[f.Name]++
 	}
+	dropped := make([]string, 0)
+	copied := 0
 	for _, item := range items {
 		if already[item.Name] > 0 {
 			already[item.Name]--
+			copied++
 			continue
 		}
-		if _, err := s.Drive.Copy(r.Context(), item.ID, folder, item.Name); err != nil {
+		if _, err := client.Copy(r.Context(), item.ID, folder, item.Name); err != nil {
+			if errors.Is(err, drive.ErrNotFound) {
+				// The photographer removed this photo after the client picked
+				// it. Drop the pick so the next try is not blocked forever.
+				if _, dbErr := s.Store.Exec(r.Context(), `UPDATE booking_photos SET selected=FALSE,updated_at=NOW() WHERE booking_id=$1 AND drive_file_id=$2`, booking.ID, item.ID); dbErr != nil {
+					log.Printf("gallery unselect %d/%s: %v", booking.ID, item.ID, dbErr)
+				}
+				dropped = append(dropped, item.Name)
+				continue
+			}
 			log.Printf("gallery copy %d/%s: %v", booking.ID, item.ID, err)
 			writeError(w, 502, "Sebagian foto gagal disalin. Silakan coba kirim lagi.")
 			return
 		}
+		copied++
 	}
-	if _, err := s.Store.Exec(r.Context(), `UPDATE bookings SET selection_folder_id=$1,selection_submitted_at=NOW(),updated_at=NOW() WHERE id=$2`, folder, booking.ID); err != nil {
+	if copied == 0 {
+		writeError(w, 409, "Foto yang Anda pilih sudah tidak tersedia di folder. Muat ulang halaman ini untuk memilih foto lain.")
+		return
+	}
+	if _, err := s.Store.Exec(r.Context(), `UPDATE bookings SET folder_mustedit_id=$1,selection_submitted_at=NOW(),updated_at=NOW() WHERE id=$2`, folder, booking.ID); err != nil {
 		log.Printf("gallery submit booking %d: %v", booking.ID, err)
 		writeError(w, 500, "Pilihan foto tersimpan, tetapi status gagal diperbarui. Silakan hubungi Elvove.")
 		return
 	}
-	writeJSON(w, 200, map[string]any{"selectedCount": len(items), "submittedAt": wibTimestamp(nowWallClock()), "message": "Pilihan foto sudah kami terima. Terima kasih."})
+	message := "Pilihan foto sudah kami terima. Terima kasih."
+	if len(dropped) > 0 {
+		message += fmt.Sprintf(" %d foto sudah tidak tersedia di folder sehingga tidak ikut dipilih: %s.", len(dropped), strings.Join(dropped, ", "))
+	}
+	writeJSON(w, 200, map[string]any{"selectedCount": copied, "submittedAt": wibTimestamp(nowWallClock()), "message": message})
 }
 
-// updateBookingRawFolder stores the Drive folder holding the raw photos and makes
-// sure the booking has a selection link. The folder is checked against Drive
-// before it is saved, so a typo is caught here rather than by the client.
-func (s *Server) updateBookingRawFolder(w http.ResponseWriter, r *http.Request) {
-	id, ok := bookingIDFromPath(w, r)
-	if !ok {
-		return
-	}
-	var req struct {
-		RawFolderURL *string `json:"rawFolderUrl"`
-	}
-	if !decodeJSON(w, r, &req) {
-		return
-	}
-	if req.RawFolderURL == nil {
-		writeValidationError(w, map[string]string{"rawFolderUrl": "Link folder foto wajib diisi."})
-		return
-	}
-	link := strings.TrimSpace(*req.RawFolderURL)
-	folderID := ""
-	if link != "" {
-		parsed, err := drive.FolderID(link)
-		if err != nil {
-			writeValidationError(w, map[string]string{"rawFolderUrl": "Tempel link folder Google Drive atau ID foldernya."})
-			return
-		}
-		folderID = parsed
-		if !s.driveClient().Enabled() {
-			writeError(w, 503, "Google Drive belum terhubung di server ini.")
-			return
-		}
-		// Reading once proves the folder exists and is shared with this account.
-		if _, err := s.Drive.ListImages(r.Context(), folderID); err != nil {
-			log.Printf("raw folder check %s: %v", folderID, err)
-			writeError(w, 400, "Folder tidak dapat dibuka. Pastikan link benar dan folder dibagikan ke aplikasi Elvove.")
-			return
-		}
-	}
-	token := newSelectionToken()
-	_, err := s.Store.Exec(r.Context(), `UPDATE bookings SET raw_folder_id=NULLIF($2,''),
-			selection_token=COALESCE(selection_token,$3),
-			selection_limit=COALESCE(selection_limit,(SELECT photo_selection_limit FROM packages p WHERE p.title=bookings.package_title ORDER BY p.id LIMIT 1),0),
-			selection_submitted_at=NULL,selection_folder_id=NULL,updated_at=NOW() WHERE id=$1`, id, folderID, token)
-	if err != nil {
-		writeError(w, 500, "Booking could not be updated.")
-		return
-	}
-	booking, err := s.fetchBooking(r, id)
-	if err != nil {
-		writeError(w, 404, "Pemesanan tidak ditemukan.")
-		return
-	}
-	writeJSON(w, 200, booking)
-}
-
-// galleryLock serializes the conversion of one photo.
+// galleryLock serializes the conversion of one photo. The entry is removed
+// when nobody holds or waits for it, so the map stays small.
 func (s *Server) galleryLock(key string) func() {
-	value, _ := s.galleryMu.LoadOrStore(key, &keyedMutex{})
-	lock := value.(*keyedMutex)
-	lock.Lock()
-	return lock.Unlock
-}
-
-func nullableInt(value int) any {
-	if value == 0 {
-		return nil
+	s.galleryMu.Lock()
+	lock := s.galleryLocks[key]
+	if lock == nil {
+		lock = &keyedMutex{}
+		s.galleryLocks[key] = lock
 	}
-	return value
+	lock.refs++
+	s.galleryMu.Unlock()
+
+	lock.Lock()
+	return func() {
+		lock.Unlock()
+		s.galleryMu.Lock()
+		lock.refs--
+		if lock.refs == 0 {
+			delete(s.galleryLocks, key)
+		}
+		s.galleryMu.Unlock()
+	}
 }
 
 // keyedMutex is one lock per photo conversion, so two requests for the same
 // thumbnail wait instead of both downloading and converting the original.
+// refs counts holders and waiters; galleryMu guards it.
 type keyedMutex struct {
-	mu sync.Mutex
+	mu   sync.Mutex
+	refs int
 }
 
 func (k *keyedMutex) Lock()   { k.mu.Lock() }

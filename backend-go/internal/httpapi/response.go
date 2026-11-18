@@ -9,9 +9,9 @@ import (
 	"github.com/elvove/photography/backend-go/internal/store"
 )
 
-// jakartaZone mirrors Java's TimeZone.setDefault(Asia/Jakarta): every timestamp
-// the API emits is WIB wall-clock with no offset.
-var jakartaZone = time.FixedZone("Asia/Jakarta", 7*60*60)
+// jakartaZone is the one WIB zone definition, shared with the store package so
+// the two cannot drift.
+var jakartaZone = store.JakartaZone
 
 // ErrorBody mirrors Java's ApiError. fieldErrors is always present (Jackson
 // writes it as null for every non-validation error), so clients can rely on the

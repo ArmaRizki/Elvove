@@ -1,7 +1,7 @@
 import { useRef, useState } from "react";
-import { LoaderCircle, Mail, ReceiptText, Save } from "lucide-react";
+import { ExternalLink, FolderOpen, Images, LoaderCircle, Mail, ReceiptText } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
-import { adminInput, adminLabel, adminNotice, adminSecondaryButton } from "./adminStyles";
+import { adminLabel, adminNotice, adminSecondaryButton } from "./adminStyles";
 import {
   PAYMENT_OPTIONS,
   formatDateTime,
@@ -13,18 +13,20 @@ import {
 /**
  * Payment state, the delivery link and the two closing e-mails of a booking.
  *
- * <p>The order matters: the confirmation asks for the DP, the settlement notice
- * asks for the balance once the DP is recorded, and the invoice closes the order
- * with the transaction details and the link to the edited photos. Every send is
- * manual, and each button stays disabled until the booking has the data that
- * message needs.</p>
+ * <p>The order matters: the confirmation asks for the DP, the selection notice
+ * hands the client the page where the photos to edit are chosen, the settlement
+ * notice asks for the balance once the DP is recorded, and the invoice closes the
+ * order with the transaction details and the link to the edited photos. Every
+ * send is manual, and each button stays disabled until the booking has the data
+ * that message needs.</p>
+ *
+ * <p>The delivery link is not typed in: it is the booking's "foto edit"
+ * folder on Google Drive, filled in when the folder is created.</p>
  */
 export default function BookingPayment({ booking, onUpdated }) {
   const [saving, setSaving] = useState(false);
-  const [savingLink, setSavingLink] = useState(false);
   const [sending, setSending] = useState("");
   const [notice, setNotice] = useState({ type: "", text: "" });
-  const [link, setLink] = useState(booking?.deliveryUrl || "");
   // Synchronous guard: two clicks in the same tick both see the ref, unlike
   // React state, which only updates after the next render.
   const inFlight = useRef(false);
@@ -41,8 +43,11 @@ export default function BookingPayment({ booking, onUpdated }) {
   const deliveryUrl = (booking.deliveryUrl || "").trim();
   const invoiceCount = Number(booking.invoiceEmailCount) || 0;
   const settlementCount = Number(booking.settlementEmailCount) || 0;
+  const selectionCount = Number(booking.selectionEmailCount) || 0;
   const invoiceSent = formatDateTime(booking.invoiceEmailSentAt);
   const settlementSent = formatDateTime(booking.settlementEmailSentAt);
+  const selectionSent = formatDateTime(booking.selectionEmailSentAt);
+  const rawFolder = (booking.rawFolderId || "").trim();
 
   const savePayment = async (paymentStatus) => {
     if (saving || paymentStatus === (booking.paymentStatus || "UNPAID")) return;
@@ -66,46 +71,25 @@ export default function BookingPayment({ booking, onUpdated }) {
     }
   };
 
-  const saveLink = async () => {
-    if (savingLink) return;
-    setSavingLink(true);
-    setNotice({ type: "", text: "" });
-
-    try {
-      const { data } = await adminApi.updateBookingDelivery(booking.id, link.trim());
-      onUpdated?.(data);
-      setNotice({
-        type: "success",
-        text: link.trim()
-          ? "Link foto tersimpan dan akan disertakan pada email invoice."
-          : "Link foto dikosongkan.",
-      });
-    } catch (error) {
-      setNotice({
-        type: "error",
-        text: error.response?.data?.message || "Link foto gagal disimpan.",
-      });
-    } finally {
-      setSavingLink(false);
-    }
-  };
-
   const send = async (kind) => {
     if (inFlight.current) return;
     inFlight.current = true;
     setSending(kind);
     setNotice({ type: "", text: "" });
 
-    const isInvoice = kind === "invoice";
-    const label = isInvoice ? "invoice" : "pelunasan";
-    const sentAtKey = isInvoice ? "invoiceEmailSentAt" : "settlementEmailSentAt";
-    const countKey = isInvoice ? "invoiceEmailCount" : "settlementEmailCount";
-    const sentCount = isInvoice ? invoiceCount : settlementCount;
+    const sentAtKey = `${kind}EmailSentAt`;
+    const countKey = `${kind}EmailCount`;
+    const sentCount =
+      kind === "invoice" ? invoiceCount : kind === "selection" ? selectionCount : settlementCount;
+    const label = kind === "invoice" ? "invoice" : kind === "selection" ? "pilihan foto" : "pelunasan";
 
     try {
-      const { data } = isInvoice
-        ? await adminApi.sendBookingInvoice(booking.id)
-        : await adminApi.sendBookingSettlement(booking.id);
+      const { data } =
+        kind === "invoice"
+          ? await adminApi.sendBookingInvoice(booking.id)
+          : kind === "selection"
+            ? await adminApi.sendBookingSelection(booking.id)
+            : await adminApi.sendBookingSettlement(booking.id);
       setNotice({
         type: "success",
         text: data?.message || `Email ${label} berhasil dikirim ke ${email}.`,
@@ -127,8 +111,7 @@ export default function BookingPayment({ booking, onUpdated }) {
     }
   };
 
-  const busy = saving || savingLink || sending !== "";
-  const linkChanged = link.trim() !== deliveryUrl;
+  const busy = saving || sending !== "";
 
   return (
     <div className="space-y-4">
@@ -165,37 +148,29 @@ export default function BookingPayment({ booking, onUpdated }) {
       </div>
 
       <div>
-        <label className={adminLabel} htmlFor="booking-delivery">
-          LINK GOOGLE DRIVE FOTO EDIT
-        </label>
-        <div className="mt-1 flex flex-col gap-2 sm:flex-row">
-          <input
-            id="booking-delivery"
-            type="url"
-            inputMode="url"
-            placeholder="https://drive.google.com/drive/folders/..."
-            value={link}
-            onChange={(event) => setLink(event.target.value)}
-            className={adminInput}
-          />
-          <button
-            type="button"
-            onClick={saveLink}
-            disabled={!linkChanged || busy}
-            aria-busy={savingLink}
-            className={`${adminSecondaryButton} shrink-0`}
-          >
-            {savingLink ? (
-              <LoaderCircle size={16} className="animate-spin" />
-            ) : (
-              <Save size={16} />
-            )}
-            Simpan Link
-          </button>
-        </div>
+        <p className={adminLabel}>LINK FOTO EDIT (OTOMATIS)</p>
+        {deliveryUrl ? (
+          <div className="mt-1 flex flex-wrap items-center gap-3 border border-green-200 bg-green-50 p-3 text-sm text-green-900">
+            <FolderOpen size={16} className="shrink-0" />
+            <span className="min-w-0 flex-1 truncate font-mono text-xs">{deliveryUrl}</span>
+            <a
+              href={deliveryUrl}
+              target="_blank"
+              rel="noreferrer"
+              className="inline-flex items-center gap-1 text-xs underline"
+            >
+              Buka <ExternalLink size={12} />
+            </a>
+          </div>
+        ) : (
+          <p className="mt-1 border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+            Folder foto edit belum ada. Tekan <strong>Periksa</strong> pada folder foto klien
+            di atas untuk membuatnya.
+          </p>
+        )}
         <p className="mt-1 text-xs text-gray-500">
-          Link ini disertakan pada email invoice. Isi setelah foto hasil edit selesai
-          diunggah ke Google Drive.
+          Mengarah ke subfolder <span className="font-mono">foto edit</span> dan ikut
+          terkirim di email invoice. Unggah hasil edit ke folder itu.
         </p>
       </div>
 
@@ -206,6 +181,34 @@ export default function BookingPayment({ booking, onUpdated }) {
         </p>
       ) : (
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+          <div className="min-w-0">
+            <button
+              type="button"
+              onClick={() => send("selection")}
+              disabled={!confirmed || !rawFolder || busy}
+              aria-busy={sending === "selection"}
+              className={`${adminSecondaryButton} w-full`}
+            >
+              {sending === "selection" ? (
+                <LoaderCircle size={16} className="animate-spin" />
+              ) : (
+                <Images size={16} />
+              )}
+              {sending === "selection"
+                ? "Mengirim email..."
+                : selectionCount > 0
+                  ? "Kirim Ulang Email Pilihan Foto"
+                  : "Kirim Email Pilihan Foto"}
+            </button>
+            <p className="mt-1 text-xs text-gray-500">
+              {!rawFolder
+                ? "Folder foto klien belum dibuat, jadi belum ada foto yang bisa dipilih."
+                : selectionSent
+                  ? `Terakhir dikirim pada ${selectionSent}. Kirim sebelum email pelunasan.`
+                  : "Langkah pertama setelah sesi: klien memilih foto yang ingin diedit."}
+            </p>
+          </div>
+
           <div className="min-w-0">
             <button
               type="button"
@@ -232,7 +235,7 @@ export default function BookingPayment({ booking, onUpdated }) {
                   ? "Tandai DP dibayar dulu sebelum menagih sisa pembayaran."
                   : settlementSent
                     ? `Terakhir dikirim pada ${settlementSent}.`
-                    : "Menagih sisa pembayaran dengan tenggat H-1 sesi."}
+                    : "Menagih sisa pembayaran setelah sesi foto."}
             </p>
           </div>
 
@@ -261,7 +264,7 @@ export default function BookingPayment({ booking, onUpdated }) {
                 : !paid
                   ? "Tandai lunas dulu sebelum mengirim invoice."
                   : !deliveryUrl
-                    ? "Isi dan simpan link Google Drive foto edit dulu."
+                    ? "Folder foto edit belum dibuat, jadi link foto edit belum ada."
                     : invoiceSent
                       ? `Terakhir dikirim pada ${invoiceSent}.`
                       : "Berisi rincian transaksi dan link foto edit."}

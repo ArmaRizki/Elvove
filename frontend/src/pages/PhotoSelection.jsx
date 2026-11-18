@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { Check, LoaderCircle, Lock, X } from "lucide-react";
+import { Check, ChevronLeft, ChevronRight, LoaderCircle, Lock, Maximize2, X } from "lucide-react";
 import { galleryApi } from "../services/galleryApi";
 import LoadingState from "../components/LoadingState";
 import SectionHeading from "../components/SectionHeading";
@@ -12,7 +12,7 @@ const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || "";
  *
  * <p>The token in the address is the whole credential, so the page shows only
  * what that one link unlocks. The picked set is saved as the client clicks; the
- * final "kirim" copies the chosen originals into the mustedit folder on Drive
+ * final "kirim" copies the chosen originals into the "foto terpilih" folder on Drive
  * and locks the choice.</p>
  */
 export default function PhotoSelection() {
@@ -23,7 +23,11 @@ export default function PhotoSelection() {
   const [saving, setSaving] = useState(false);
   const [notice, setNotice] = useState({ type: "", text: "" });
   const [submitting, setSubmitting] = useState(false);
+  // Index of the photo open in the full view, or null when it is closed.
+  const [viewer, setViewer] = useState(null);
   const saveTimer = useRef(null);
+  // The save already on the wire, so submit can wait for it instead of racing it.
+  const savePending = useRef(null);
 
   // The gallery is read once per token. Every state change happens in the
   // promise callbacks, never synchronously in the effect.
@@ -54,8 +58,8 @@ export default function PhotoSelection() {
     };
   }, [token]);
 
-  // A pending save has to go out before the tab closes, or the last click is
-  // lost when the client closes the window straight after picking.
+  // Drop the debounce when the page unmounts; a request already sent keeps
+  // running, but a timer that fires after unmount would only fail.
   useEffect(() => {
     return () => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
@@ -69,13 +73,45 @@ export default function PhotoSelection() {
 
   const photos = useMemo(() => gallery?.photos || [], [gallery]);
 
+  const closeViewer = useCallback(() => setViewer(null), []);
+  const stepViewer = useCallback(
+    (delta) =>
+      setViewer((current) => {
+        if (current === null) return current;
+        const next = current + delta;
+        return next < 0 || next >= photos.length ? current : next;
+      }),
+    [photos.length]
+  );
+
+  // Escape closes the full view and the arrows move through the folder, the way
+  // a photo viewer is expected to behave. The page behind must not scroll while
+  // the overlay is up.
+  useEffect(() => {
+    if (viewer === null) return undefined;
+    const onKey = (event) => {
+      if (event.key === "Escape") closeViewer();
+      if (event.key === "ArrowLeft") stepViewer(-1);
+      if (event.key === "ArrowRight") stepViewer(1);
+    };
+    window.addEventListener("keydown", onKey);
+    const previous = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      document.body.style.overflow = previous;
+    };
+  }, [viewer, closeViewer, stepViewer]);
+
   const persist = useCallback(
     (ids) => {
       if (saveTimer.current) clearTimeout(saveTimer.current);
       saveTimer.current = setTimeout(() => {
         setSaving(true);
-        galleryApi
-          .saveSelection(token, ids)
+        // Saves run one after another, so they reach the server in the order
+        // the photos were clicked and the newest set is the one that stays.
+        savePending.current = (savePending.current || Promise.resolve())
+          .then(() => galleryApi.saveSelection(token, ids))
           .then(() => setNotice({ type: "", text: "" }))
           .catch((error) =>
             setNotice({
@@ -90,7 +126,7 @@ export default function PhotoSelection() {
   );
 
   const toggle = (id) => {
-    if (locked) return;
+    if (locked || submitting) return;
     setNotice({ type: "", text: "" });
     setPicked((current) => {
       let next;
@@ -116,6 +152,14 @@ export default function PhotoSelection() {
     setSubmitting(true);
     setNotice({ type: "", text: "" });
     try {
+      // Flush the debounced save first: submit copies the rows the server has,
+      // so a pick made in the last 350 ms would otherwise be left out.
+      if (saveTimer.current) {
+        clearTimeout(saveTimer.current);
+        saveTimer.current = null;
+      }
+      if (savePending.current) await savePending.current;
+      await galleryApi.saveSelection(token, picked);
       const { data } = await galleryApi.submitSelection(token);
       setGallery((current) => ({ ...current, submittedAt: data.submittedAt }));
       setNotice({
@@ -207,44 +251,55 @@ export default function PhotoSelection() {
       )}
 
       <div className="mt-8 grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4">
-        {photos.map((photo) => {
-          const index = picked.indexOf(photo.id);
-          const chosen = index !== -1;
+        {photos.map((photo, index) => {
+          const chosen = picked.indexOf(photo.id) !== -1;
           return (
-            <button
+            <div
               key={photo.id}
-              type="button"
-              onClick={() => toggle(photo.id)}
-              disabled={locked}
-              aria-pressed={chosen}
-              className={`group relative aspect-square overflow-hidden border-2 bg-gray-100 transition-colors ${
+              className={`group relative aspect-square overflow-hidden border-2 bg-gray-100 ${
                 chosen ? "border-[#E11D48]" : "border-transparent"
-              } ${locked ? "cursor-default" : "cursor-pointer"}`}
+              }`}
             >
-              <img
-                src={`${API_BASE_URL}${galleryApi.photoUrl(token, photo.id)}`}
-                alt={photo.name}
-                loading="lazy"
-                decoding="async"
-                className="h-full w-full object-cover"
-              />
-              {chosen && (
-                <span className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center bg-[#E11D48] text-xs font-bold text-white">
-                  {index + 1}
-                </span>
-              )}
-              {!locked && (
-                <span
-                  className={`absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 ${
-                    chosen ? "group-hover:opacity-100" : ""
-                  }`}
-                >
-                  <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-900">
-                    {chosen ? <X size={18} /> : <Check size={18} />}
+              <button
+                type="button"
+                onClick={() => toggle(photo.id)}
+                disabled={locked}
+                aria-pressed={chosen}
+                className={`block h-full w-full ${locked ? "cursor-default" : "cursor-pointer"}`}
+              >
+                <img
+                  src={`${API_BASE_URL}${galleryApi.photoUrl(token, photo.id)}`}
+                  alt={photo.name}
+                  loading="lazy"
+                  decoding="async"
+                  className="h-full w-full object-cover"
+                />
+                {chosen && (
+                  <span className="absolute left-2 top-2 flex h-7 w-7 items-center justify-center bg-[#E11D48] text-xs font-bold text-white">
+                    {picked.indexOf(photo.id) + 1}
                   </span>
-                </span>
-              )}
-            </button>
+                )}
+                {!locked && (
+                  <span
+                    className={`absolute inset-0 flex items-center justify-center bg-black/40 opacity-0 transition-opacity group-hover:opacity-100 ${
+                      chosen ? "group-hover:opacity-100" : ""
+                    }`}
+                  >
+                    <span className="flex h-9 w-9 items-center justify-center rounded-full bg-white text-gray-900">
+                      {chosen ? <X size={18} /> : <Check size={18} />}
+                    </span>
+                  </span>
+                )}
+              </button>
+              <button
+                type="button"
+                onClick={() => setViewer(index)}
+                aria-label={`Lihat ${photo.name} ukuran penuh`}
+                className="absolute bottom-2 right-2 z-10 flex h-9 w-9 items-center justify-center bg-black/60 text-white transition-colors hover:bg-[#E11D48]"
+              >
+                <Maximize2 size={16} />
+              </button>
+            </div>
           );
         })}
       </div>
@@ -270,6 +325,67 @@ export default function PhotoSelection() {
             Setelah dikirim, pilihan tidak dapat diubah lagi. Pilih {limit} foto untuk hasil terbaik —
             Anda masih bisa mengirim walau belum penuh.
           </p>
+        </div>
+      )}
+
+      {viewer !== null && photos[viewer] && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={photos[viewer].name}
+          onClick={closeViewer}
+          className="fixed inset-0 z-50 flex flex-col bg-black/95"
+        >
+          <div className="flex items-center justify-between gap-4 px-4 py-3 text-white">
+            <span className="min-w-0 truncate text-xs tracking-widest text-white/70">
+              {viewer + 1} / {photos.length}
+            </span>
+            <span className="min-w-0 flex-1 truncate text-center text-sm">{photos[viewer].name}</span>
+            <button
+              type="button"
+              onClick={closeViewer}
+              aria-label="Tutup"
+              autoFocus
+              className="flex h-9 w-9 shrink-0 items-center justify-center text-white/80 transition-colors hover:text-white"
+            >
+              <X size={20} />
+            </button>
+          </div>
+
+          <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 pb-4 sm:px-14">
+            <img
+              src={`${API_BASE_URL}${galleryApi.photoUrl(token, photos[viewer].id)}`}
+              alt={photos[viewer].name}
+              onClick={(event) => event.stopPropagation()}
+              className="max-h-full max-w-full object-contain"
+            />
+            {viewer > 0 && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  stepViewer(-1);
+                }}
+                aria-label="Foto sebelumnya"
+                className="absolute left-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center bg-black/40 text-white transition-colors hover:bg-[#E11D48] sm:left-2"
+              >
+                <ChevronLeft size={24} />
+              </button>
+            )}
+            {viewer < photos.length - 1 && (
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  stepViewer(1);
+                }}
+                aria-label="Foto berikutnya"
+                className="absolute right-1 top-1/2 flex h-11 w-11 -translate-y-1/2 items-center justify-center bg-black/40 text-white transition-colors hover:bg-[#E11D48] sm:right-2"
+              >
+                <ChevronRight size={24} />
+              </button>
+            )}
+          </div>
         </div>
       )}
     </div>

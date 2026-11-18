@@ -16,7 +16,6 @@ const LatestGallery = lazy(() => import("./pages/LatestGallery"));
 const Booking = lazy(() => import("./pages/Booking"));
 const Contact = lazy(() => import("./pages/Contact"));
 const Privacy = lazy(() => import("./pages/Privacy"));
-const Terms = lazy(() => import("./pages/Terms"));
 const TermsAndConditions = lazy(() => import("./pages/TermsAndConditions"));
 const PhotoSelection = lazy(() => import("./pages/PhotoSelection"));
 
@@ -32,6 +31,7 @@ const ContactEditor = lazy(() => import("./pages/admin/ContactEditor"));
 const SocialLinksEditor = lazy(() => import("./pages/admin/SocialLinksEditor"));
 const TermsEditor = lazy(() => import("./pages/admin/TermsEditor"));
 const SmtpSettings = lazy(() => import("./pages/admin/SmtpSettings"));
+const DriveSettings = lazy(() => import("./pages/admin/DriveSettings"));
 
 export default function App() {
   return (
@@ -49,7 +49,7 @@ export default function App() {
               <Route path="/booking" element={<Booking />} />
               <Route path="/contact" element={<Contact />} />
               <Route path="/privacy" element={<Privacy />} />
-              <Route path="/terms" element={<Terms />} />
+              <Route path="/terms" element={<Navigate to="/terms-and-conditions" replace />} />
               <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
               {/* Opened from the e-mail link; the token in the path is the key. */}
               <Route path="/pilih/:token" element={<PhotoSelection />} />
@@ -77,6 +77,7 @@ export default function App() {
               <Route path="social-links" element={<SocialLinksEditor />} />
               <Route path="terms" element={<TermsEditor />} />
               <Route path="smtp" element={<SmtpSettings />} />
+              <Route path="drive" element={<DriveSettings />} />
             </Route>
           </Routes>
         </Suspense>

@@ -84,9 +84,9 @@ func (s *Store) Exec(ctx context.Context, query string, args ...any) (int64, err
 	return tag.RowsAffected(), nil
 }
 
-// jakartaZone mirrors Java's TimeZone.setDefault(Asia/Jakarta): every timestamp
+// JakartaZone mirrors Java's TimeZone.setDefault(Asia/Jakarta): every timestamp
 // the API emits is WIB wall-clock with no offset.
-var jakartaZone = time.FixedZone("Asia/Jakarta", 7*60*60)
+var JakartaZone = time.FixedZone("Asia/Jakarta", 7*60*60)
 
 // Now returns the current time prepared for a `timestamp without time zone`
 // column; see WallClock.
@@ -101,7 +101,7 @@ func Now() time.Time { return WallClock(time.Now()) }
 // WIB fields as UTC makes pgx write "2026-11-10 13:59" verbatim, and reading the
 // row back yields those same WIB fields.
 func WallClock(t time.Time) time.Time {
-	wib := t.In(jakartaZone)
+	wib := t.In(JakartaZone)
 	return time.Date(wib.Year(), wib.Month(), wib.Day(), wib.Hour(), wib.Minute(), wib.Second(), wib.Nanosecond(), time.UTC)
 }
 

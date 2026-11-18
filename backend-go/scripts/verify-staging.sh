@@ -231,6 +231,19 @@ MAILED=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages")
 assert_json 'exactly one schedule e-mail reached the SMTP server' "$MAILED" \
   "d['total']==$MAIL_BEFORE+1 and 'Jadwal Sesi Foto Diperbarui' in d['messages'][0]['Subject']"
 
+# New flow: a reschedule request must pass through ACCEPTED again; completing
+# straight from RESCHEDULE_REQUESTED is refused.
+assert_json 'RESCHEDULE_REQUESTED cannot jump straight to COMPLETED' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"status":"COMPLETED"}' "$BASE/api/admin/bookings/1/status")" \
+  "d['status']==400 and 'tidak dapat diubah' in d['message'] and 'Selesai' in d['message']"
+assert_json 'RESCHEDULE_REQUESTED moves to ACCEPTED' \
+  "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
+     -d '{"status":"ACCEPTED"}' "$BASE/api/admin/bookings/1/status")" \
+  "d['status']=='ACCEPTED'"
+docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -q \
+  -c "update bookings set status='PENDING' where id=1;" >/dev/null
+
 log '9. Payment status and the invoice / settlement e-mails'
 # The invoice is the last message of a booking, so nothing can be billed yet.
 assert_json 'invoice refused before the booking is accepted' \
@@ -254,6 +267,44 @@ DOWN_PAID=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type:
 assert_json 'PATCH /payment records the down payment' "$DOWN_PAID" \
   "d['paymentStatus']=='DOWN_PAYMENT_PAID' and d['downPaymentPaidAt'] is not None and d['settlementPaidAt'] is None"
 
+# The selection link has its own notice now, sent before the settlement one, so
+# the choice comes first and the settlement e-mail only asks for money.
+assert_json 'the selection e-mail is refused while the photos are not uploaded' \
+  "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+     "$BASE/api/admin/bookings/1/selection-email")" \
+  "d['status']==400 and 'Folder foto klien belum ada' in d['message']"
+docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -q \
+  -c "update bookings set raw_folder_id='folderRAW123456' where id=1;" >/dev/null
+PICK_BEFORE=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages" \
+  | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
+PICK=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
+  "$BASE/api/admin/bookings/1/selection-email")
+assert_json 'the selection e-mail answers and is tracked' "$PICK" \
+  "d['selectionEmailCount']==1 and d['sentTo']=='klien1@example.test' and 'Email pilihan foto berhasil dikirim' in d['message']"
+PICK_MAILED=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages")
+assert_json 'the selection notice reached the SMTP server' "$PICK_MAILED" \
+  "d['total']==$PICK_BEFORE+1 and d['messages'][0]['Subject']=='Pilih Foto untuk Diedit — Elvove'"
+# Booking 1 was seeded without a token, like every booking taken before
+# selection links existed. The notice has to carry a link the customer can open,
+# so sending it mints one.
+PICK_TOKEN=$(docker exec -i "$DB_CONTAINER" psql -U postgres -d elvove_verify -tAc \
+  "select coalesce(selection_token,'') from bookings where id=1;")
+if [[ ${#PICK_TOKEN} -ge 32 ]] && [[ $PICK_TOKEN =~ ^[a-f0-9]+$ ]]; then
+  ok 'the selection notice mints a token for an older booking'
+else
+  bad "booking 1 still has no usable selection token (got: ${PICK_TOKEN:0:40})"
+fi
+# The link follows MAIL_SITE_URL, which is what the customer's browser opens,
+# not the address the test talks to the API on.
+SITE="http://localhost:$API_PORT"
+PICK_ID=$(printf '%s' "$PICK_MAILED" | python3 -c 'import sys,json;print(json.load(sys.stdin)["messages"][0]["ID"])')
+PICK_BODY=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/message/$PICK_ID")
+if printf '%s' "$PICK_BODY" | grep -q "$SITE/pilih/$PICK_TOKEN"; then
+  ok "the selection notice carries the link $SITE/pilih/<token>"
+else
+  bad 'the selection notice carries no selection link'
+fi
+
 SETTLE_BEFORE=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages" \
   | python3 -c 'import sys,json;print(json.load(sys.stdin)["total"])')
 SETTLEMENT=$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
@@ -263,6 +314,13 @@ assert_json 'settlement e-mail answers and is tracked' "$SETTLEMENT" \
 SETTLE_MAILED=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/messages")
 assert_json 'the settlement notice reached the SMTP server' "$SETTLE_MAILED" \
   "d['total']==$SETTLE_BEFORE+1 and d['messages'][0]['Subject']=='Pelunasan Sisa Pembayaran — Elvove'"
+SETTLE_ID=$(printf '%s' "$SETTLE_MAILED" | python3 -c 'import sys,json;print(json.load(sys.stdin)["messages"][0]["ID"])')
+SETTLE_BODY=$(curl -s "http://127.0.0.1:$MAIL_HTTP_PORT/api/v1/message/$SETTLE_ID")
+if printf '%s' "$SETTLE_BODY" | grep -q "/pilih/"; then
+  bad 'the settlement notice still carries the selection link'
+else
+  ok 'the settlement notice asks for the balance only, without the selection link'
+fi
 
 COMPLETED_ONE=$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
   -d '{"status":"COMPLETED"}' "$BASE/api/admin/bookings/1/status")
@@ -287,7 +345,7 @@ assert_json 'a settled booking refuses a settlement e-mail' \
 assert_json 'invoice refused without a delivery link' \
   "$(curl -s -X POST -H "Authorization: Bearer $TOKEN" \
      "$BASE/api/admin/bookings/1/invoice-email")" \
-  "d['status']==400 and 'Google Drive' in d['message']"
+  "d['status']==400 and 'Link folder foto edit' in d['message']"
 assert_json 'PATCH /delivery rejects a link that is not http(s)' \
   "$(curl -s -X PATCH -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' \
      -d '{"deliveryUrl":"javascript:alert(1)"}' "$BASE/api/admin/bookings/1/delivery")" \

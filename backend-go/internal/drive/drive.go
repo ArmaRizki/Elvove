@@ -192,10 +192,15 @@ func (c *Client) do(ctx context.Context, method, target string, body io.Reader, 
 		}
 		if resp.StatusCode >= 300 {
 			// The Google message names the actual problem (wrong folder id,
-			// permission missing), so it is kept for the log.
+			// permission missing), so it is kept for the log. A 404 is wrapped
+			// so callers can tell "gone" from "broken".
 			payload, _ := io.ReadAll(io.LimitReader(resp.Body, 4<<10))
 			resp.Body.Close()
-			return fmt.Errorf("drive %s %s: %s: %s", method, target, resp.Status, strings.TrimSpace(string(payload)))
+			failure := fmt.Errorf("drive %s %s: %s: %s", method, target, resp.Status, strings.TrimSpace(string(payload)))
+			if resp.StatusCode == http.StatusNotFound {
+				return fmt.Errorf("%w: %v", ErrNotFound, failure)
+			}
+			return failure
 		}
 		if out == nil {
 			io.Copy(io.Discard, resp.Body)
@@ -250,6 +255,78 @@ func (c *Client) ListImages(ctx context.Context, folderID string) ([]File, error
 		}
 		pageToken = page.NextPageToken
 	}
+}
+
+// ListFolders returns the subfolders of a folder.
+func (c *Client) ListFolders(ctx context.Context, folderID string) ([]Info, error) {
+	folders := make([]Info, 0)
+	pageToken := ""
+	for {
+		query := url.Values{
+			"q":        {"'" + escapeQuery(folderID) + "' in parents and trashed = false and mimeType = '" + folderMime + "'"},
+			"fields":   {"nextPageToken,files(id,name)"},
+			"orderBy":  {"name_natural"},
+			"pageSize": {"200"},
+		}
+		if pageToken != "" {
+			query.Set("pageToken", pageToken)
+		}
+		var page struct {
+			NextPageToken string `json:"nextPageToken"`
+			Files         []struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"files"`
+		}
+		if err := c.do(ctx, http.MethodGet, c.apiBase+"/files?"+query.Encode(), nil, "", &page); err != nil {
+			return nil, err
+		}
+		for _, f := range page.Files {
+			folders = append(folders, Info{ID: f.ID, Name: f.Name})
+		}
+		if page.NextPageToken == "" {
+			return folders, nil
+		}
+		pageToken = page.NextPageToken
+	}
+}
+
+// ListImagesRecursive lists the images in a folder and in the subfolders below
+// it.
+//
+// The photographer sorts the photos into subfolders, so a flat list would hide
+// them. The folders the site keeps for itself (the webp previews, the picked
+// photos, the edited photos) are skipped: the client page shows the photos, not
+// the site's own copies of them.
+func (c *Client) ListImagesRecursive(ctx context.Context, folderID string, skip ...string) ([]File, error) {
+	files, err := c.ListImages(ctx, folderID)
+	if err != nil {
+		return nil, err
+	}
+	folders, err := c.ListFolders(ctx, folderID)
+	if err != nil {
+		return nil, err
+	}
+	for _, folder := range folders {
+		if nameIn(folder.Name, skip) {
+			continue
+		}
+		more, err := c.ListImagesRecursive(ctx, folder.ID, skip...)
+		if err != nil {
+			return nil, err
+		}
+		files = append(files, more...)
+	}
+	return files, nil
+}
+
+func nameIn(name string, names []string) bool {
+	for _, candidate := range names {
+		if name == candidate {
+			return true
+		}
+	}
+	return false
 }
 
 // EnsureFolder returns the id of the named subfolder, creating it when missing.

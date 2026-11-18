@@ -40,7 +40,7 @@ function StatusBadge({ status }) {
 const NEXT_STATUSES = {
   PENDING: ["ACCEPTED", "RESCHEDULE_REQUESTED"],
   ACCEPTED: ["COMPLETED"],
-  RESCHEDULE_REQUESTED: ["ACCEPTED", "COMPLETED"],
+  RESCHEDULE_REQUESTED: ["ACCEPTED"],
   COMPLETED: [],
 };
 
@@ -67,22 +67,29 @@ export default function Bookings() {
     load();
   }, []);
 
-  const openDetail = (booking) => {
+  // The list row has no photo counts or folder ids, so the popup opens with it
+  // and swaps in the full record from the detail endpoint when it arrives.
+  const openDetail = useCallback(async (booking) => {
     setSelected(booking);
     setNotice({ type: "", text: "" });
-  };
+    try {
+      const { data } = await adminApi.getBooking(booking.id);
+      setSelected((current) => (current?.id === booking.id ? data : current));
+    } catch {
+      setNotice({ type: "error", text: "Detail pemesanan gagal dimuat. Muat ulang halaman ini." });
+    }
+  }, []);
 
   const openBookingById = useCallback((id) => {
     const match = bookings.find((item) => String(item.id) === String(id));
     if (match) {
       setDeepLinkMessage("");
-      setSelected(match);
-      setNotice({ type: "", text: "" });
+      openDetail(match);
       return true;
     }
     setDeepLinkMessage("Pemesanan tidak ditemukan. Mungkin sudah dihapus.");
     return false;
-  }, [bookings]);
+  }, [bookings, openDetail]);
 
   // Opens the booking named in ?booking=ID. Only IDs that are digits are used,
   // and the booking must exist in the list the admin is already allowed to load.
@@ -159,7 +166,7 @@ export default function Bookings() {
   const handleDelete = async (booking) => {
     if (
       !window.confirm(
-        `Hapus pemesanan dari ${booking.name}? Tindakan ini tidak dapat dibatalkan.`
+        `Hapus pemesanan dari ${booking.name}?\n\nFolder foto klien di Google Drive ikut dipindahkan ke Trash, jadi masih bisa dipulihkan dari sana selama 30 hari.`
       )
     ) {
       return;
@@ -353,9 +360,9 @@ export default function Bookings() {
             role="dialog"
             aria-modal="true"
             aria-label={`Detail pemesanan ${selected.name}`}
-            className="max-h-[92vh] w-full max-w-2xl overflow-y-auto bg-white shadow-xl"
+            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden bg-white shadow-xl"
           >
-            <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 sm:p-5">
+            <div className="flex items-start justify-between gap-3 border-b border-gray-200 bg-white p-4 sm:p-5">
               <div className="min-w-0">
                 <p className="text-xs tracking-widest text-[#E11D48]">DETAIL PEMESANAN</p>
                 <h2 className="mt-1 break-words font-display text-xl text-gray-900">
@@ -372,87 +379,106 @@ export default function Bookings() {
               </button>
             </div>
 
-            <BookingDetails booking={selected} />
+            <div className="min-h-0 flex-1 overflow-y-auto">
+              <BookingDetails booking={selected} />
 
-            <div className="space-y-4 border-t border-gray-200 p-4 sm:p-5">
-              <div>
-                <label className={adminLabel} htmlFor="booking-status">
-                  UBAH STATUS PEMESANAN
-                </label>
-                <select
-                  id="booking-status"
-                  value={selected.status}
-                  disabled={statusSaving || (NEXT_STATUSES[selected.status] || []).length === 0}
-                  onChange={(event) => changeStatus(event.target.value)}
-                  className="mt-1 w-full border border-gray-200 bg-transparent px-3 py-2.5 text-sm text-gray-900 focus:border-[#E11D48] outline-none disabled:opacity-60 sm:max-w-xs"
-                >
-                  {STATUS_OPTIONS.filter(
-                    (option) =>
-                      option.value === selected.status ||
-                      (NEXT_STATUSES[selected.status] || []).includes(option.value)
-                  ).map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.label}
-                    </option>
-                  ))}
-                </select>
-                {(NEXT_STATUSES[selected.status] || []).length === 0 && (
-                  <p className="mt-2 text-xs text-gray-500">
-                    Pemesanan selesai tidak dapat diubah lagi.
-                  </p>
-                )}
-                {statusSaving && (
-                  <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                    <LoaderCircle size={14} className="animate-spin" />
-                    Menyimpan status...
-                  </p>
-                )}
+              <div className="space-y-5 border-t border-gray-200 bg-gray-50 p-4 sm:p-5">
+                <div className="space-y-4 border border-gray-200 bg-white p-4">
+                  <h3 className="text-[10px] tracking-widest text-gray-500">STATUS PEMESANAN</h3>
+                  <div>
+                    <label className={adminLabel} htmlFor="booking-status">
+                      UBAH STATUS
+                    </label>
+                    <select
+                      id="booking-status"
+                      value={selected.status}
+                      disabled={statusSaving || (NEXT_STATUSES[selected.status] || []).length === 0}
+                      onChange={(event) => changeStatus(event.target.value)}
+                      className="mt-1 w-full border border-gray-200 bg-transparent px-3 py-2.5 text-sm text-gray-900 focus:border-[#E11D48] outline-none disabled:opacity-60 sm:max-w-xs"
+                    >
+                      {STATUS_OPTIONS.filter(
+                        (option) =>
+                          option.value === selected.status ||
+                          (NEXT_STATUSES[selected.status] || []).includes(option.value)
+                      ).map((option) => (
+                        <option key={option.value} value={option.value}>
+                          {option.label}
+                        </option>
+                      ))}
+                    </select>
+                    {(NEXT_STATUSES[selected.status] || []).length === 0 && (
+                      <p className="mt-2 text-xs text-gray-500">
+                        Pemesanan selesai tidak dapat diubah lagi.
+                      </p>
+                    )}
+                    {statusSaving && (
+                      <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                        <LoaderCircle size={14} className="animate-spin" />
+                        Menyimpan status...
+                      </p>
+                    )}
+                  </div>
+
+                  {notice.text && (
+                    <p
+                      className={`border p-3 text-sm ${
+                        notice.type === "success"
+                          ? "border-green-200 bg-green-50 text-green-800"
+                          : "border-red-200 bg-red-50 text-red-700"
+                      }`}
+                      role="status"
+                    >
+                      {notice.text}
+                    </p>
+                  )}
+
+                  <BookingConfirmationEmail
+                    key={selected.id}
+                    booking={selected}
+                    onSent={(tracking) => {
+                      setSelected((current) => (current ? { ...current, ...tracking } : current));
+                      setBookings((current) =>
+                        current.map((item) =>
+                          item.id === selected.id ? { ...item, ...tracking } : item
+                        )
+                      );
+                    }}
+                  />
+
+                  {selected.status !== "ACCEPTED" && selected.status !== "COMPLETED" && (
+                    <p className="text-xs text-gray-500">
+                      Tombol kirim email konfirmasi tersedia setelah status pemesanan diubah menjadi
+                      Diterima.
+                    </p>
+                  )}
+                </div>
+
+                <div className="border border-gray-200 bg-white p-4">
+                  <h3 className="text-[10px] tracking-widest text-gray-500">
+                    FOTO &amp; PILIHAN KLIEN
+                  </h3>
+                  <div className="mt-4">
+                    <BookingSelection
+                      key={`selection-${selected.id}`}
+                      booking={selected}
+                      onUpdated={applyBookingUpdate}
+                    />
+                  </div>
+                </div>
+
+                <div className="border border-gray-200 bg-white p-4">
+                  <h3 className="text-[10px] tracking-widest text-gray-500">
+                    PEMBAYARAN &amp; EMAIL PENUTUP
+                  </h3>
+                  <div className="mt-4">
+                    <BookingPayment
+                      key={`payment-${selected.id}`}
+                      booking={selected}
+                      onUpdated={applyBookingUpdate}
+                    />
+                  </div>
+                </div>
               </div>
-
-              {notice.text && (
-                <p
-                  className={`border p-3 text-sm ${
-                    notice.type === "success"
-                      ? "border-green-200 bg-green-50 text-green-800"
-                      : "border-red-200 bg-red-50 text-red-700"
-                  }`}
-                  role="status"
-                >
-                  {notice.text}
-                </p>
-              )}
-
-              <BookingConfirmationEmail
-                key={selected.id}
-                booking={selected}
-                onSent={(tracking) => {
-                  setSelected((current) => (current ? { ...current, ...tracking } : current));
-                  setBookings((current) =>
-                    current.map((item) =>
-                      item.id === selected.id ? { ...item, ...tracking } : item
-                    )
-                  );
-                }}
-              />
-
-              <BookingSelection
-                key={`selection-${selected.id}`}
-                booking={selected}
-                onUpdated={applyBookingUpdate}
-              />
-
-              <BookingPayment
-                key={`payment-${selected.id}`}
-                booking={selected}
-                onUpdated={applyBookingUpdate}
-              />
-
-              {selected.status !== "ACCEPTED" && selected.status !== "COMPLETED" && (
-                <p className="text-xs text-gray-500">
-                  Tombol kirim email konfirmasi tersedia setelah status pemesanan diubah menjadi
-                  Diterima.
-                </p>
-              )}
             </div>
           </div>
         </div>

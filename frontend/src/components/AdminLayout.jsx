@@ -15,6 +15,7 @@ import {
   Menu,
   X,
   Mail,
+  HardDrive,
 } from "lucide-react";
 
 const navItems = [
@@ -28,6 +29,7 @@ const navItems = [
   { to: "/admin/social-links", label: "Tautan Media Sosial", icon: Share2 },
   { to: "/admin/terms", label: "Syarat dan Ketentuan", icon: FileText },
   { to: "/admin/smtp", label: "Pengaturan Email", icon: Mail },
+  { to: "/admin/drive", label: "Google Drive", icon: HardDrive },
 ];
 
 function SidebarContent({ admin, onLogout, onNavigate }) {

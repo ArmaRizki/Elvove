@@ -166,6 +166,49 @@ func TestEnsureFolderReusesExisting(t *testing.T) {
 	}
 }
 
+// A folder the client opens has to be readable by link, and sharing it twice
+// must not ask Google for a second permission it would refuse.
+func TestShareViewerCreatesOneAnyonePermission(t *testing.T) {
+	var creates int
+	shared := false
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch {
+		case r.URL.Path == "/token":
+			json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+		case r.Method == http.MethodGet:
+			permissions := []map[string]any{}
+			if shared {
+				permissions = append(permissions, map[string]any{"type": "anyone"})
+			}
+			json.NewEncoder(w).Encode(map[string]any{"permissions": permissions})
+		case r.Method == http.MethodPost:
+			var body map[string]any
+			json.NewDecoder(r.Body).Decode(&body)
+			if body["role"] != "reader" || body["type"] != "anyone" {
+				t.Errorf("permission body = %v", body)
+			}
+			creates++
+			shared = true
+			json.NewEncoder(w).Encode(map[string]any{"id": "anyoneWithLink"})
+		default:
+			t.Errorf("unexpected request %s %s", r.Method, r.URL)
+		}
+	}))
+	defer server.Close()
+	c := New("id", "secret", "refresh", "", "", "")
+	c.tokenURL = server.URL + "/token"
+	c.apiBase = server.URL
+
+	for i := 0; i < 2; i++ {
+		if err := c.ShareViewer(context.Background(), "folder-1"); err != nil {
+			t.Fatalf("ShareViewer = %v", err)
+		}
+	}
+	if creates != 1 {
+		t.Errorf("permission created %d times, want 1", creates)
+	}
+}
+
 func TestAPIFailureIsReported(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.URL.Path == "/token" {
@@ -182,5 +225,48 @@ func TestAPIFailureIsReported(t *testing.T) {
 
 	if _, err := c.ListImages(context.Background(), "abc"); err == nil || !strings.Contains(err.Error(), "File not found") {
 		t.Fatalf("ListImages error = %v", err)
+	}
+}
+
+// The client page reads the whole folder tree: a photographer who sorts the
+// photos into subfolders must still see them, and the site's own folders (webp,
+// foto terpilih, foto edit) must not show up as photos.
+func TestListImagesRecursiveWalksSubfoldersAndSkipsOwn(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/token" {
+			json.NewEncoder(w).Encode(map[string]any{"access_token": "t", "expires_in": 3600})
+			return
+		}
+		q := r.URL.Query().Get("q")
+		switch {
+		case strings.Contains(q, "'root' in parents and trashed = false and mimeType contains 'image/'"):
+			json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "top", "name": "top.jpg", "mimeType": "image/jpeg"}}})
+		case strings.Contains(q, "'root' in parents and trashed = false and mimeType = 'application/vnd.google-apps.folder'"):
+			json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{
+				{"id": "day1", "name": "hari 1"},
+				{"id": "webp", "name": "webp"},
+			}})
+		case strings.Contains(q, "'day1' in parents and trashed = false and mimeType = 'application/vnd.google-apps.folder'"):
+			json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{}})
+		case strings.Contains(q, "'day1' in parents"):
+			json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{{"id": "deep", "name": "deep.jpg", "mimeType": "image/jpeg"}}})
+		case strings.Contains(q, "'webp' in parents"):
+			t.Error("the webp folder must be skipped, not walked")
+			json.NewEncoder(w).Encode(map[string]any{"files": []map[string]any{}})
+		default:
+			t.Errorf("unexpected query %s", q)
+		}
+	}))
+	defer server.Close()
+	c := New("id", "secret", "refresh", "", "", "")
+	c.tokenURL = server.URL + "/token"
+	c.apiBase = server.URL
+
+	files, err := c.ListImagesRecursive(context.Background(), "root", "webp", "foto terpilih", "foto edit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(files) != 2 || files[0].ID != "top" || files[1].ID != "deep" {
+		t.Fatalf("files = %+v", files)
 	}
 }
