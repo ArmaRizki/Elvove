@@ -12,6 +12,7 @@ import { X } from "lucide-react";
  *   open       whether the dialog is shown
  *   onClose    called by the cover, the close button and the Escape key
  *   title      the heading; also the accessible name when `label` is left out
+ *   eyebrow    small red line above the heading, for a detail pane's context
  *   label      accessible name when the title alone is not enough
  *   children   the dialog body, usually a <form>
  *   footer     optional row under the body, outside its scroll area
@@ -22,6 +23,7 @@ export default function Modal({
   open,
   onClose,
   title,
+  eyebrow,
   label,
   children,
   footer,
@@ -63,7 +65,18 @@ export default function Modal({
       >
         {(title || onClose) && (
           <div className="flex items-center justify-between gap-3 border-b border-gray-200 px-4 py-4 sm:px-6">
-            <h2 className="min-w-0 break-words font-display text-lg text-gray-900">{title}</h2>
+            <div className="min-w-0">
+              {eyebrow && (
+                <p className="text-xs tracking-widest text-[#E11D48]">{eyebrow}</p>
+              )}
+              <h2
+                className={`min-w-0 break-words font-display text-gray-900 ${
+                  eyebrow ? "mt-1 text-xl" : "text-lg"
+                }`}
+              >
+                {title}
+              </h2>
+            </div>
             <button
               type="button"
               onClick={onClose}

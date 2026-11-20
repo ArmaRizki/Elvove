@@ -1,9 +1,10 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X, Upload } from "lucide-react";
+import { Plus, Pencil, Trash2, Upload } from "lucide-react";
 import { adminApi } from "../services/adminApi";
 import LoadingState from "./LoadingState";
 import EmptyState from "./EmptyState";
 import AdminPageHeader from "./admin/AdminPageHeader";
+import Modal from "./Modal";
 import {
   adminIconButton,
   adminInput,
@@ -201,111 +202,89 @@ export default function AdminResourceManager({ title, fields, columns, api, empt
         </>
       )}
 
-      {modalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 p-4 sm:p-6"
-          onClick={() => setModalOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${editing ? "Ubah" : "Tambah"} ${title}`}
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto border border-gray-200 bg-white"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4 sm:px-6">
-              <h2 className="font-display text-lg text-gray-900">
-                {editing ? "Ubah" : "Tambah"} {title}
-              </h2>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="p-2 text-gray-700 hover:text-gray-900"
-                aria-label="Tutup"
-              >
-                <X size={20} />
-              </button>
-            </div>
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={`${editing ? "Ubah" : "Tambah"} ${title}`}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-6">
+          {fields.map((f) => (
+            <div key={f.name}>
+              <label className={adminLabel} htmlFor={`field-${f.name}`}>
+                {f.label.toUpperCase()}
+              </label>
 
-            <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-6">
-              {fields.map((f) => (
-                <div key={f.name}>
-                  <label className={adminLabel} htmlFor={`field-${f.name}`}>
-                    {f.label.toUpperCase()}
-                  </label>
+              {f.type === "textarea" && (
+                <textarea
+                  id={`field-${f.name}`}
+                  rows={3}
+                  value={form[f.name] ?? ""}
+                  onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+                  className={adminInput}
+                  required={f.required}
+                />
+              )}
 
-                  {f.type === "textarea" && (
-                    <textarea
-                      id={`field-${f.name}`}
-                      rows={3}
-                      value={form[f.name] ?? ""}
-                      onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
-                      className={adminInput}
-                      required={f.required}
-                    />
-                  )}
-
-                  {f.type === "checkbox" && (
-                    <div className="mt-2">
-                      <input
-                        id={`field-${f.name}`}
-                        type="checkbox"
-                        checked={!!form[f.name]}
-                        onChange={(e) => setForm({ ...form, [f.name]: e.target.checked })}
-                        className="accent-brass"
-                      />
-                    </div>
-                  )}
-
-                  {f.type === "image" && (
-                    <div className="mt-1 flex items-center gap-3">
-                      {form[f.name] && (
-                        <img src={getImageUrl(form[f.name])} alt="" className="h-14 w-14 border border-gray-200 object-cover" />
-                      )}
-                      <label className="flex cursor-pointer items-center gap-2 border border-gray-200 px-3 py-2 text-xs text-gray-700 hover:text-gray-900">
-                        <Upload size={14} />
-                        {uploading ? "Mengunggah..." : "Unggah gambar"}
-                        <input
-                          type="file"
-                          accept={ACCEPTED_IMAGE_EXTENSIONS}
-                          className="hidden"
-                          onChange={(e) => handleFileUpload(f.name, e.target.files[0])}
-                        />
-                      </label>
-                    </div>
-                  )}
-
-                  {f.type === "image" && (
-                    <p className="mt-2 text-xs text-gray-500">
-                      Format JPG, PNG, atau WebP. Maksimal {MAX_FILE_LABEL} per foto.
-                    </p>
-                  )}
-
-                  {(f.type === "text" || f.type === "number" || f.type === undefined) && (
-                    <input
-                      id={`field-${f.name}`}
-                      type={f.type === "number" ? "number" : "text"}
-                      value={form[f.name] ?? ""}
-                      onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
-                      className={adminInput}
-                      required={f.required}
-                    />
-                  )}
+              {f.type === "checkbox" && (
+                <div className="mt-2">
+                  <input
+                    id={`field-${f.name}`}
+                    type="checkbox"
+                    checked={!!form[f.name]}
+                    onChange={(e) => setForm({ ...form, [f.name]: e.target.checked })}
+                    className="accent-brass"
+                  />
                 </div>
-              ))}
+              )}
 
-              {error && <p className="text-burgundy text-sm">{error}</p>}
+              {f.type === "image" && (
+                <div className="mt-1 flex items-center gap-3">
+                  {form[f.name] && (
+                    <img src={getImageUrl(form[f.name])} alt="" className="h-14 w-14 border border-gray-200 object-cover" />
+                  )}
+                  <label className="flex cursor-pointer items-center gap-2 border border-gray-200 px-3 py-2 text-xs text-gray-700 hover:text-gray-900">
+                    <Upload size={14} />
+                    {uploading ? "Mengunggah..." : "Unggah gambar"}
+                    <input
+                      type="file"
+                      accept={ACCEPTED_IMAGE_EXTENSIONS}
+                      className="hidden"
+                      onChange={(e) => handleFileUpload(f.name, e.target.files[0])}
+                    />
+                  </label>
+                </div>
+              )}
 
-              <button
-                type="submit"
-                disabled={saving || uploading}
-                className={`${adminPrimaryButton} w-full`}
-              >
-                {saving ? "Menyimpan..." : "Simpan"}
-              </button>
-            </form>
-          </div>
-        </div>
-      )}
+              {f.type === "image" && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Format JPG, PNG, atau WebP. Maksimal {MAX_FILE_LABEL} per foto.
+                </p>
+              )}
+
+              {(f.type === "text" || f.type === "number" || f.type === undefined) && (
+                <input
+                  id={`field-${f.name}`}
+                  type={f.type === "number" ? "number" : "text"}
+                  value={form[f.name] ?? ""}
+                  onChange={(e) => setForm({ ...form, [f.name]: e.target.value })}
+                  className={adminInput}
+                  required={f.required}
+                />
+              )}
+            </div>
+          ))}
+
+          {error && <p className="text-burgundy text-sm">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={saving || uploading}
+            className={`${adminPrimaryButton} w-full`}
+          >
+            {saving ? "Menyimpan..." : "Simpan"}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 }

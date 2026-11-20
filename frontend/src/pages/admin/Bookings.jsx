@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
-import { LoaderCircle, Trash2, X } from "lucide-react";
+import { LoaderCircle, Trash2 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
+import Modal from "../../components/Modal";
 import BookingDetails from "../../components/admin/BookingDetails";
 import BookingConfirmationEmail from "../../components/admin/BookingConfirmationEmail";
 import BookingPayment from "../../components/admin/BookingPayment";
@@ -349,140 +350,115 @@ export default function Bookings() {
         </>
       )}
 
-      {selected && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) closeDetail();
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Detail pemesanan ${selected.name}`}
-            className="flex max-h-[92vh] w-full max-w-3xl flex-col overflow-hidden bg-white shadow-xl"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-gray-200 bg-white p-4 sm:p-5">
-              <div className="min-w-0">
-                <p className="text-xs tracking-widest text-[#E11D48]">DETAIL PEMESANAN</p>
-                <h2 className="mt-1 break-words font-display text-xl text-gray-900">
-                  {selected.name}
-                </h2>
-              </div>
-              <button
-                type="button"
-                onClick={closeDetail}
-                className="p-2 text-gray-700 hover:bg-gray-100"
-                aria-label="Tutup detail pemesanan"
+      <Modal
+        open={Boolean(selected)}
+        onClose={closeDetail}
+        label={selected ? `Detail pemesanan ${selected.name}` : "Detail pemesanan"}
+        eyebrow="DETAIL PEMESANAN"
+        title={selected?.name}
+        size="lg"
+        tone="dim"
+      >
+        <BookingDetails booking={selected} />
+
+        <div className="space-y-5 border-t border-gray-200 bg-gray-50 p-4 sm:p-5">
+          <div className="space-y-4 border border-gray-200 bg-white p-4">
+            <h3 className="text-[10px] tracking-widest text-gray-500">STATUS PEMESANAN</h3>
+            <div>
+              <label className={adminLabel} htmlFor="booking-status">
+                UBAH STATUS
+              </label>
+              <select
+                id="booking-status"
+                value={selected.status}
+                disabled={statusSaving || (NEXT_STATUSES[selected.status] || []).length === 0}
+                onChange={(event) => changeStatus(event.target.value)}
+                className="mt-1 w-full border border-gray-200 bg-transparent px-3 py-2.5 text-sm text-gray-900 focus:border-[#E11D48] outline-none disabled:opacity-60 sm:max-w-xs"
               >
-                <X size={18} />
-              </button>
+                {STATUS_OPTIONS.filter(
+                  (option) =>
+                    option.value === selected.status ||
+                    (NEXT_STATUSES[selected.status] || []).includes(option.value)
+                ).map((option) => (
+                  <option key={option.value} value={option.value}>
+                    {option.label}
+                  </option>
+                ))}
+              </select>
+              {(NEXT_STATUSES[selected.status] || []).length === 0 && (
+                <p className="mt-2 text-xs text-gray-500">
+                  Pemesanan selesai tidak dapat diubah lagi.
+                </p>
+              )}
+              {statusSaving && (
+                <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
+                  <LoaderCircle size={14} className="animate-spin" />
+                  Menyimpan status...
+                </p>
+              )}
             </div>
 
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              <BookingDetails booking={selected} />
+            {notice.text && (
+              <p
+                className={`border p-3 text-sm ${
+                  notice.type === "success"
+                    ? "border-green-200 bg-green-50 text-green-800"
+                    : "border-red-200 bg-red-50 text-red-700"
+                }`}
+                role="status"
+              >
+                {notice.text}
+              </p>
+            )}
 
-              <div className="space-y-5 border-t border-gray-200 bg-gray-50 p-4 sm:p-5">
-                <div className="space-y-4 border border-gray-200 bg-white p-4">
-                  <h3 className="text-[10px] tracking-widest text-gray-500">STATUS PEMESANAN</h3>
-                  <div>
-                    <label className={adminLabel} htmlFor="booking-status">
-                      UBAH STATUS
-                    </label>
-                    <select
-                      id="booking-status"
-                      value={selected.status}
-                      disabled={statusSaving || (NEXT_STATUSES[selected.status] || []).length === 0}
-                      onChange={(event) => changeStatus(event.target.value)}
-                      className="mt-1 w-full border border-gray-200 bg-transparent px-3 py-2.5 text-sm text-gray-900 focus:border-[#E11D48] outline-none disabled:opacity-60 sm:max-w-xs"
-                    >
-                      {STATUS_OPTIONS.filter(
-                        (option) =>
-                          option.value === selected.status ||
-                          (NEXT_STATUSES[selected.status] || []).includes(option.value)
-                      ).map((option) => (
-                        <option key={option.value} value={option.value}>
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                    {(NEXT_STATUSES[selected.status] || []).length === 0 && (
-                      <p className="mt-2 text-xs text-gray-500">
-                        Pemesanan selesai tidak dapat diubah lagi.
-                      </p>
-                    )}
-                    {statusSaving && (
-                      <p className="mt-2 flex items-center gap-2 text-xs text-gray-500">
-                        <LoaderCircle size={14} className="animate-spin" />
-                        Menyimpan status...
-                      </p>
-                    )}
-                  </div>
+            <BookingConfirmationEmail
+              key={selected.id}
+              booking={selected}
+              onSent={(tracking) => {
+                setSelected((current) => (current ? { ...current, ...tracking } : current));
+                setBookings((current) =>
+                  current.map((item) =>
+                    item.id === selected.id ? { ...item, ...tracking } : item
+                  )
+                );
+              }}
+            />
 
-                  {notice.text && (
-                    <p
-                      className={`border p-3 text-sm ${
-                        notice.type === "success"
-                          ? "border-green-200 bg-green-50 text-green-800"
-                          : "border-red-200 bg-red-50 text-red-700"
-                      }`}
-                      role="status"
-                    >
-                      {notice.text}
-                    </p>
-                  )}
+            {selected.status !== "ACCEPTED" && selected.status !== "COMPLETED" && (
+              <p className="text-xs text-gray-500">
+                Tombol kirim email konfirmasi tersedia setelah status pemesanan diubah menjadi
+                Diterima.
+              </p>
+            )}
+          </div>
 
-                  <BookingConfirmationEmail
-                    key={selected.id}
-                    booking={selected}
-                    onSent={(tracking) => {
-                      setSelected((current) => (current ? { ...current, ...tracking } : current));
-                      setBookings((current) =>
-                        current.map((item) =>
-                          item.id === selected.id ? { ...item, ...tracking } : item
-                        )
-                      );
-                    }}
-                  />
+          <div className="border border-gray-200 bg-white p-4">
+            <h3 className="text-[10px] tracking-widest text-gray-500">
+              FOTO &amp; PILIHAN KLIEN
+            </h3>
+            <div className="mt-4">
+              <BookingSelection
+                key={`selection-${selected.id}`}
+                booking={selected}
+                onUpdated={applyBookingUpdate}
+              />
+            </div>
+          </div>
 
-                  {selected.status !== "ACCEPTED" && selected.status !== "COMPLETED" && (
-                    <p className="text-xs text-gray-500">
-                      Tombol kirim email konfirmasi tersedia setelah status pemesanan diubah menjadi
-                      Diterima.
-                    </p>
-                  )}
-                </div>
-
-                <div className="border border-gray-200 bg-white p-4">
-                  <h3 className="text-[10px] tracking-widest text-gray-500">
-                    FOTO &amp; PILIHAN KLIEN
-                  </h3>
-                  <div className="mt-4">
-                    <BookingSelection
-                      key={`selection-${selected.id}`}
-                      booking={selected}
-                      onUpdated={applyBookingUpdate}
-                    />
-                  </div>
-                </div>
-
-                <div className="border border-gray-200 bg-white p-4">
-                  <h3 className="text-[10px] tracking-widest text-gray-500">
-                    PEMBAYARAN &amp; EMAIL PENUTUP
-                  </h3>
-                  <div className="mt-4">
-                    <BookingPayment
-                      key={`payment-${selected.id}`}
-                      booking={selected}
-                      onUpdated={applyBookingUpdate}
-                    />
-                  </div>
-                </div>
-              </div>
+          <div className="border border-gray-200 bg-white p-4">
+            <h3 className="text-[10px] tracking-widest text-gray-500">
+              PEMBAYARAN &amp; EMAIL PENUTUP
+            </h3>
+            <div className="mt-4">
+              <BookingPayment
+                key={`payment-${selected.id}`}
+                booking={selected}
+                onUpdated={applyBookingUpdate}
+              />
             </div>
           </div>
         </div>
-      )}
+      </Modal>
     </div>
   );
 }

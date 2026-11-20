@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import {
   ChevronLeft,
   ChevronRight,
-  X,
   Mail,
   CalendarClock,
   MapPin,
@@ -10,6 +9,7 @@ import {
 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import CustomDatePicker from "../CustomDatePicker";
+import Modal from "../Modal";
 import CustomTimePicker from "../CustomTimePicker";
 import BookingPayment from "./BookingPayment";
 import BookingSelection from "./BookingSelection";
@@ -368,138 +368,116 @@ export default function BookingCalendar() {
         </div>
       )}
 
-      {selected && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-3 sm:p-4"
-          onMouseDown={(event) => {
-            if (event.target === event.currentTarget) setSelected(null);
-          }}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`Detail pemesanan ${selected.name}`}
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto bg-white shadow-xl"
-          >
-            <div className="flex items-start justify-between gap-3 border-b border-gray-200 p-4 sm:p-5">
-              <div className="min-w-0">
-                <p className="text-xs uppercase tracking-widest text-[#E11D48]">
-                  {selected.status === "RESCHEDULE_REQUESTED"
-                    ? "Permintaan ubah jadwal"
-                    : selected.status === "COMPLETED"
-                      ? "Pemesanan selesai"
-                      : selected.status === "ACCEPTED"
-                        ? "Pemesanan diterima"
-                        : "Pemesanan menunggu"}
-                </p>
-                <h2 className="mt-1 truncate font-display text-xl">{selected.name}</h2>
-              </div>
-              <button
-                type="button"
-                className="p-2 text-gray-700 hover:bg-gray-100"
-                onClick={() => setSelected(null)}
-                aria-label="Tutup"
-              >
-                <X size={18} />
-              </button>
-            </div>
-
-            <div className="space-y-3 break-words p-4 text-sm sm:p-5">
-              <p className="flex items-center gap-2 break-all"><Mail size={15} /> {selected.email}</p>
-              <p className="flex items-center gap-2"><Phone size={15} /> {selected.phone}</p>
-              <p className="flex items-center gap-2"><MapPin size={15} /> {selected.eventLocation || "-"}</p>
-              <p className="text-gray-600">Paket: {selected.packageTitle || "-"}</p>
-              <p className="text-gray-600">
-                Jadwal saat ini: {formatDate(selected.eventDate) || "-"} · {timeOf(selected.eventTime)}
-              </p>
-            </div>
-
-            <div className="space-y-3 border-t border-gray-200 p-4 sm:p-5">
-              {canReschedule && (
-                <>
-                  <h3 className="flex items-center gap-2 font-medium">
-                    <CalendarClock size={16} /> Ubah jadwal
-                  </h3>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="min-w-0">
-                      <label htmlFor="reschedule-date" className={adminLabel}>
-                        Tanggal baru
-                      </label>
-                      <CustomDatePicker
-                        id="reschedule-date"
-                        value={newDate}
-                        onChange={setNewDate}
-                        label="Tanggal baru"
-                        className={`${adminInput} form-field--icon flex items-center`}
-                      />
-                    </div>
-                    <div className="min-w-0">
-                      <label htmlFor="reschedule-time" className={adminLabel}>
-                        Waktu baru
-                      </label>
-                      <CustomTimePicker
-                        id="reschedule-time"
-                        value={newTime}
-                        onChange={setNewTime}
-                        label="Waktu baru"
-                        className={`${adminInput} form-field--icon flex items-center`}
-                      />
-                    </div>
-                  </div>
-                  <button
-                    type="button"
-                    disabled={busy}
-                    onClick={reschedule}
-                    className={`${adminSecondaryButton} w-full border-[#E11D48] text-[#E11D48] hover:bg-rose-50`}
-                  >
-                    Simpan Jadwal & Kirim Email
-                  </button>
-                </>
-              )}
-              {canSendConfirmation && (
-                <button
-                  type="button"
-                  disabled={busy}
-                  onClick={sendConfirmation}
-                  className={`${adminSecondaryButton} w-full`}
-                >
-                  <Mail size={15} /> Kirim Email Konfirmasi
-                </button>
-              )}
-              <div className="border-t border-gray-200 pt-3">
-                <BookingSelection
-                  key={`selection-${selected.id}`}
-                  booking={selected}
-                  onUpdated={(update) => {
-                    if (!update) return;
-                    setSelected((current) => (current ? { ...current, ...update } : current));
-                    load();
-                  }}
-                />
-              </div>
-
-              <div className="border-t border-gray-200 pt-3">
-                <BookingPayment
-                  key={`payment-${selected.id}`}
-                  booking={selected}
-                  onUpdated={(update) => {
-                    if (!update) return;
-                    setSelected((current) => (current ? { ...current, ...update } : current));
-                    // The list drives the calendar cells, so the payment marker
-                    // there has to come from the server too.
-                    load();
-                  }}
-                />
-              </div>
-              {!canReschedule && !canSendConfirmation && (
-                <p className="text-sm text-gray-600">
-                  Pemesanan ini sudah selesai. Jadwal dan email konfirmasi tidak dapat diubah lagi.
-                </p>
-              )}
-            </div>
-          </div>
+      <Modal
+        open={Boolean(selected)}
+        onClose={() => setSelected(null)}
+        label={selected ? `Detail pemesanan ${selected.name}` : "Detail pemesanan"}
+        eyebrow={
+          selected?.status === "RESCHEDULE_REQUESTED"
+            ? "Permintaan ubah jadwal"
+            : selected?.status === "COMPLETED"
+              ? "Pemesanan selesai"
+              : selected?.status === "ACCEPTED"
+                ? "Pemesanan diterima"
+                : "Pemesanan menunggu"
+        }
+        title={selected?.name}
+        tone="dim"
+      >
+        <div className="space-y-3 break-words p-4 text-sm sm:p-5">
+          <p className="flex items-center gap-2 break-all"><Mail size={15} /> {selected.email}</p>
+          <p className="flex items-center gap-2"><Phone size={15} /> {selected.phone}</p>
+          <p className="flex items-center gap-2"><MapPin size={15} /> {selected.eventLocation || "-"}</p>
+          <p className="text-gray-600">Paket: {selected.packageTitle || "-"}</p>
+          <p className="text-gray-600">
+            Jadwal saat ini: {formatDate(selected.eventDate) || "-"} · {timeOf(selected.eventTime)}
+          </p>
         </div>
-      )}
+
+      <div className="space-y-3 border-t border-gray-200 p-4 sm:p-5">
+        {canReschedule && (
+          <>
+            <h3 className="flex items-center gap-2 font-medium">
+              <CalendarClock size={16} /> Ubah jadwal
+            </h3>
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+              <div className="min-w-0">
+                <label htmlFor="reschedule-date" className={adminLabel}>
+                  Tanggal baru
+                </label>
+                <CustomDatePicker
+                  id="reschedule-date"
+                  value={newDate}
+                  onChange={setNewDate}
+                  label="Tanggal baru"
+                  className={`${adminInput} form-field--icon flex items-center`}
+                />
+              </div>
+              <div className="min-w-0">
+                <label htmlFor="reschedule-time" className={adminLabel}>
+                  Waktu baru
+                </label>
+                <CustomTimePicker
+                  id="reschedule-time"
+                  value={newTime}
+                  onChange={setNewTime}
+                  label="Waktu baru"
+                  className={`${adminInput} form-field--icon flex items-center`}
+                />
+              </div>
+            </div>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={reschedule}
+              className={`${adminSecondaryButton} w-full border-[#E11D48] text-[#E11D48] hover:bg-rose-50`}
+            >
+              Simpan Jadwal & Kirim Email
+            </button>
+          </>
+        )}
+        {canSendConfirmation && (
+          <button
+            type="button"
+            disabled={busy}
+            onClick={sendConfirmation}
+            className={`${adminSecondaryButton} w-full`}
+          >
+            <Mail size={15} /> Kirim Email Konfirmasi
+          </button>
+        )}
+        <div className="border-t border-gray-200 pt-3">
+          <BookingSelection
+            key={`selection-${selected.id}`}
+            booking={selected}
+            onUpdated={(update) => {
+              if (!update) return;
+              setSelected((current) => (current ? { ...current, ...update } : current));
+              load();
+            }}
+          />
+        </div>
+
+        <div className="border-t border-gray-200 pt-3">
+          <BookingPayment
+            key={`payment-${selected.id}`}
+            booking={selected}
+            onUpdated={(update) => {
+              if (!update) return;
+              setSelected((current) => (current ? { ...current, ...update } : current));
+              // The list drives the calendar cells, so the payment marker
+              // there has to come from the server too.
+              load();
+            }}
+          />
+        </div>
+        {!canReschedule && !canSendConfirmation && (
+          <p className="text-sm text-gray-600">
+            Pemesanan ini sudah selesai. Jadwal dan email konfirmasi tidak dapat diubah lagi.
+          </p>
+        )}
+        </div>
+      </Modal>
     </div>
   );
 }

@@ -1,10 +1,11 @@
 import { useEffect, useState } from "react";
-import { Plus, Pencil, Trash2, X } from "lucide-react";
+import { Plus, Pencil, Trash2 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import { formatPrice } from "../../utils/format";
 import LoadingState from "../../components/LoadingState";
 import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
+import Modal from "../../components/Modal";
 import {
   adminIconButton,
   adminInput,
@@ -195,106 +196,87 @@ export default function Packages() {
         </>
       )}
 
-      {modalOpen && (
-        <div
-          className="fixed inset-0 z-50 flex items-center justify-center bg-white/80 p-4 sm:p-6"
-          onClick={() => setModalOpen(false)}
-        >
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-label={`${editing ? "Ubah" : "Tambah"} Paket`}
-            className="max-h-[90vh] w-full max-w-lg overflow-y-auto border border-gray-200 bg-white"
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div className="flex items-center justify-between border-b border-gray-200 px-4 py-4 sm:px-6">
-              <h2 className="font-display text-lg text-gray-900">{editing ? "Ubah" : "Tambah"} Paket</h2>
-              <button
-                onClick={() => setModalOpen(false)}
-                className="p-2 text-gray-700 hover:text-gray-900"
-                aria-label="Tutup"
-              >
-                <X size={20} />
-              </button>
-            </div>
-            <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-6">
-              <div>
-                <label className={adminLabel} htmlFor="package-title">JUDUL</label>
-                <input
-                  id="package-title"
-                  value={form.title}
-                  onChange={(e) => setForm({ ...form, title: e.target.value })}
-                  required
-                  className={adminInput}
-                />
-              </div>
-              <div>
-                <label className={adminLabel} htmlFor="package-price">HARGA (IDR)</label>
-                <input
-                  id="package-price"
-                  type="number"
-                  value={form.price}
-                  onChange={(e) => setForm({ ...form, price: e.target.value })}
-                  required
-                  className={adminInput}
-                />
-              </div>
-              <div>
-                <label className={adminLabel} htmlFor="package-photo-limit">
-                  JUMLAH FOTO YANG DAPAT DIPILIH KLIEN
-                </label>
-                <input
-                  id="package-photo-limit"
-                  type="number"
-                  min="0"
-                  max="1000"
-                  value={form.photoSelectionLimit}
-                  onChange={(e) => setForm({ ...form, photoSelectionLimit: e.target.value })}
-                  className={adminInput}
-                />
-                <p className="mt-1 text-xs text-gray-500">
-                  Batas foto yang boleh dipilih klien di halaman pilihan foto, misalnya 10 untuk
-                  paket Origin atau 30 untuk Ascend. Isi 0 bila paket tidak termasuk pemilihan foto.
-                </p>
-              </div>
-              <div>
-                <label className={adminLabel} htmlFor="package-features">FITUR (SATU PER BARIS)</label>
-                <textarea
-                  id="package-features"
-                  rows={5}
-                  value={form.featuresText}
-                  onChange={(e) => setForm({ ...form, featuresText: e.target.value })}
-                  className={adminInput}
-                />
-              </div>
-              <div>
-                <label className={adminLabel} htmlFor="package-order">URUTAN TAMPIL</label>
-                <input
-                  id="package-order"
-                  type="number"
-                  value={form.displayOrder}
-                  onChange={(e) => setForm({ ...form, displayOrder: e.target.value })}
-                  className={adminInput}
-                />
-              </div>
-              <label className="flex items-center gap-2 text-sm text-gray-700" htmlFor="package-highlighted">
-                <input
-                  id="package-highlighted"
-                  type="checkbox"
-                  checked={form.highlighted}
-                  onChange={(e) => setForm({ ...form, highlighted: e.target.checked })}
-                  className="accent-brass"
-                />
-                Tandai sebagai &quot;Paling Banyak Dipesan&quot;
-              </label>
-              {error && <p className="text-burgundy text-sm">{error}</p>}
-              <button type="submit" disabled={saving} className={`${adminPrimaryButton} w-full`}>
-                {saving ? "Menyimpan..." : "Simpan"}
-              </button>
-            </form>
+      <Modal
+        open={modalOpen}
+        onClose={() => setModalOpen(false)}
+        title={`${editing ? "Ubah" : "Tambah"} Paket`}
+      >
+        <form onSubmit={handleSubmit} className="space-y-4 p-4 sm:p-6">
+          <div>
+            <label className={adminLabel} htmlFor="package-title">JUDUL</label>
+            <input
+              id="package-title"
+              value={form.title}
+              onChange={(e) => setForm({ ...form, title: e.target.value })}
+              required
+              className={adminInput}
+            />
           </div>
-        </div>
-      )}
+          <div>
+            <label className={adminLabel} htmlFor="package-price">HARGA (IDR)</label>
+            <input
+              id="package-price"
+              type="number"
+              value={form.price}
+              onChange={(e) => setForm({ ...form, price: e.target.value })}
+              required
+              className={adminInput}
+            />
+          </div>
+          <div>
+            <label className={adminLabel} htmlFor="package-photo-limit">
+              JUMLAH FOTO YANG DAPAT DIPILIH KLIEN
+            </label>
+            <input
+              id="package-photo-limit"
+              type="number"
+              min="0"
+              max="1000"
+              value={form.photoSelectionLimit}
+              onChange={(e) => setForm({ ...form, photoSelectionLimit: e.target.value })}
+              className={adminInput}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Batas foto yang boleh dipilih klien di halaman pilihan foto, misalnya 10 untuk
+              paket Origin atau 30 untuk Ascend. Isi 0 bila paket tidak termasuk pemilihan foto.
+            </p>
+          </div>
+          <div>
+            <label className={adminLabel} htmlFor="package-features">FITUR (SATU PER BARIS)</label>
+            <textarea
+              id="package-features"
+              rows={5}
+              value={form.featuresText}
+              onChange={(e) => setForm({ ...form, featuresText: e.target.value })}
+              className={adminInput}
+            />
+          </div>
+          <div>
+            <label className={adminLabel} htmlFor="package-order">URUTAN TAMPIL</label>
+            <input
+              id="package-order"
+              type="number"
+              value={form.displayOrder}
+              onChange={(e) => setForm({ ...form, displayOrder: e.target.value })}
+              className={adminInput}
+            />
+          </div>
+          <label className="flex items-center gap-2 text-sm text-gray-700" htmlFor="package-highlighted">
+            <input
+              id="package-highlighted"
+              type="checkbox"
+              checked={form.highlighted}
+              onChange={(e) => setForm({ ...form, highlighted: e.target.checked })}
+              className="accent-brass"
+            />
+            Tandai sebagai &quot;Paling Banyak Dipesan&quot;
+          </label>
+          {error && <p className="text-burgundy text-sm">{error}</p>}
+          <button type="submit" disabled={saving} className={`${adminPrimaryButton} w-full`}>
+            {saving ? "Menyimpan..." : "Simpan"}
+          </button>
+        </form>
+      </Modal>
     </div>
   );
 }
