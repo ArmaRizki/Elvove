@@ -51,9 +51,15 @@ type driveSettings struct {
 	updatedAt string
 }
 
-// loadDriveSettings reads the row. A missing row is an empty, unconfigured
-// value rather than an error: the panel shows "belum tersambung" instead of
-// failing.
+// loadDriveSettings reads the connection row. A missing row is an empty,
+// unconfigured value rather than an error: the panel shows "belum tersambung"
+// instead of failing.
+//
+// The row the connection is kept in is the one id=1 names. The table has no
+// unique constraint beyond its primary key, so without the WHERE clause every
+// statement above would be ambiguous: several rows could exist, a query would
+// read whichever one it liked, and an admin's save could land on a row the rest
+// of the server never reads.
 func (s *Server) loadDriveSettings(ctx context.Context) (driveSettings, error) {
 	var d driveSettings
 	err := s.Store.Pool.QueryRow(ctx, `SELECT COALESCE(client_id,''), COALESCE(encrypted_client_secret,''),
