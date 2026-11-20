@@ -368,22 +368,22 @@ export default function Bookings() {
               </label>
               <select
                 id="booking-status"
-                value={selected.status}
-                disabled={statusSaving || (NEXT_STATUSES[selected.status] || []).length === 0}
+                value={selected?.status}
+                disabled={statusSaving || (NEXT_STATUSES[selected?.status] || []).length === 0}
                 onChange={(event) => changeStatus(event.target.value)}
                 className="mt-1 w-full border border-gray-200 bg-transparent px-3 py-2.5 text-sm text-gray-900 focus:border-[#E11D48] outline-none disabled:opacity-60 sm:max-w-xs"
               >
                 {STATUS_OPTIONS.filter(
                   (option) =>
-                    option.value === selected.status ||
-                    (NEXT_STATUSES[selected.status] || []).includes(option.value)
+                    option.value === selected?.status ||
+                    (NEXT_STATUSES[selected?.status] || []).includes(option.value)
                 ).map((option) => (
                   <option key={option.value} value={option.value}>
                     {option.label}
                   </option>
                 ))}
               </select>
-              {(NEXT_STATUSES[selected.status] || []).length === 0 && (
+              {(NEXT_STATUSES[selected?.status] || []).length === 0 && (
                 <p className="mt-2 text-xs text-gray-500">
                   Pemesanan selesai tidak dapat diubah lagi.
                 </p>
@@ -410,7 +410,7 @@ export default function Bookings() {
             )}
 
             <BookingConfirmationEmail
-              key={selected.id}
+              key={selected?.id}
               booking={selected}
               onSent={(tracking) => {
                 setSelected((current) => (current ? { ...current, ...tracking } : current));
@@ -422,7 +422,7 @@ export default function Bookings() {
               }}
             />
 
-            {selected.status !== "ACCEPTED" && selected.status !== "COMPLETED" && (
+            {selected?.status !== "ACCEPTED" && selected?.status !== "COMPLETED" && (
               <p className="text-xs text-gray-500">
                 Tombol kirim email konfirmasi tersedia setelah status pemesanan diubah menjadi
                 Diterima.
@@ -436,7 +436,7 @@ export default function Bookings() {
             </h3>
             <div className="mt-4">
               <BookingSelection
-                key={`selection-${selected.id}`}
+                key={`selection-${selected?.id}`}
                 booking={selected}
                 onUpdated={applyBookingUpdate}
               />
@@ -449,7 +449,7 @@ export default function Bookings() {
             </h3>
             <div className="mt-4">
               <BookingPayment
-                key={`payment-${selected.id}`}
+                key={`payment-${selected?.id}`}
                 booking={selected}
                 onUpdated={applyBookingUpdate}
               />
