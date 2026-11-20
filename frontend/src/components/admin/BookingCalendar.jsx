@@ -383,12 +383,12 @@ export default function BookingCalendar() {
         tone="dim"
       >
         <div className="space-y-3 break-words p-4 text-sm sm:p-5">
-          <p className="flex items-center gap-2 break-all"><Mail size={15} /> {selected.email}</p>
-          <p className="flex items-center gap-2"><Phone size={15} /> {selected.phone}</p>
-          <p className="flex items-center gap-2"><MapPin size={15} /> {selected.eventLocation || "-"}</p>
-          <p className="text-gray-600">Paket: {selected.packageTitle || "-"}</p>
+          <p className="flex items-center gap-2 break-all"><Mail size={15} /> {selected?.email}</p>
+          <p className="flex items-center gap-2"><Phone size={15} /> {selected?.phone}</p>
+          <p className="flex items-center gap-2"><MapPin size={15} /> {selected?.eventLocation || "-"}</p>
+          <p className="text-gray-600">Paket: {selected?.packageTitle || "-"}</p>
           <p className="text-gray-600">
-            Jadwal saat ini: {formatDate(selected.eventDate) || "-"} · {timeOf(selected.eventTime)}
+            Jadwal saat ini: {formatDate(selected?.eventDate) || "-"} · {timeOf(selected?.eventTime)}
           </p>
         </div>
 
@@ -446,7 +446,7 @@ export default function BookingCalendar() {
         )}
         <div className="border-t border-gray-200 pt-3">
           <BookingSelection
-            key={`selection-${selected.id}`}
+            key={`selection-${selected?.id}`}
             booking={selected}
             onUpdated={(update) => {
               if (!update) return;
@@ -458,7 +458,7 @@ export default function BookingCalendar() {
 
         <div className="border-t border-gray-200 pt-3">
           <BookingPayment
-            key={`payment-${selected.id}`}
+            key={`payment-${selected?.id}`}
             booking={selected}
             onUpdated={(update) => {
               if (!update) return;
