@@ -156,6 +156,13 @@ func (s *Server) Handler() http.Handler {
 	// without it there is nothing to guess, so these stay outside the admin
 	// middleware.
 	mux.HandleFunc("GET /api/gallery/{token}", s.limitGallery(s.getGallery))
+	// The token and id are checked before the handler runs: without this
+	// pattern, a path that does not match one of the routes above falls to the
+	// catch-all "/" at the end of this function, which answers an empty 401 —
+	// and the limiter in front of the handler would never see the request.
+	// net/http resolves the conflict by specificity, so this does not shadow the
+	// routes above.
+	mux.HandleFunc("GET /api/gallery/{token}/{rest...}", s.limitGallery(s.galleryUnknown))
 	mux.HandleFunc("GET /api/gallery/{token}/photos/{id}", s.limitGallery(s.galleryPhoto))
 	mux.HandleFunc("PUT /api/gallery/{token}/selection", s.limitGallery(s.saveSelection))
 	mux.HandleFunc("POST /api/gallery/{token}/submit", s.limitGallery(s.submitSelection))

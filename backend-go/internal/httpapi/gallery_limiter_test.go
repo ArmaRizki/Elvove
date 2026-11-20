@@ -153,3 +153,39 @@ func TestGalleryWindowsAreGenerousEnoughForOnePage(t *testing.T) {
 		t.Fatal("the windows must be positive")
 	}
 }
+
+// TestGalleryLimitIsReachedThroughTheRealRouter answers the question the
+// wrapper tests cannot: does a request to /api/gallery/{token}/photos reach
+// limitGallery at all, or does an earlier pattern answer first?
+//
+// The mux matches on its own, so the path values only exist once net/http has
+// routed the request. Driving limitGallery directly supplies them by hand and
+// would keep passing even if no route ever called it.
+func TestGalleryLimitIsReachedThroughTheRealRouter(t *testing.T) {
+	server := &Server{Limiter: NewRateLimiter()}
+	handler := server.Handler()
+	const token = "aabbccddeeff00112233445566778899"
+	path := "/api/gallery/" + token + "/photos"
+
+	var last int
+	var lastBody string
+	for i := 0; i < galleryListPerMinute; i++ {
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+		last, lastBody = recorder.Code, recorder.Body.String()
+		if last == http.StatusTooManyRequests {
+			t.Fatalf("request %d was throttled before the window closed at %d", i+1, galleryListPerMinute)
+		}
+	}
+	if last == http.StatusTooManyRequests {
+		t.Fatalf("the last request inside the window answered 429")
+	}
+	t.Logf("inside the window: %d %s", last, lastBody)
+
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	if recorder.Code != http.StatusTooManyRequests {
+		t.Fatalf("request %d through the router answered %d, want 429: the route does not pass through limitGallery",
+			galleryListPerMinute+1, recorder.Code)
+	}
+}

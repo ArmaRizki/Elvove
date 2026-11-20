@@ -753,3 +753,11 @@ type keyedMutex struct {
 
 func (k *keyedMutex) Lock()   { k.mu.Lock() }
 func (k *keyedMutex) Unlock() { k.mu.Unlock() }
+
+// galleryUnknown answers a gallery path that matches no route of its own, such
+// as /api/gallery/{token}/photos. The limiter in front of it still applies, so
+// one token cannot hammer the server with any path it likes; the answer is the
+// same 404 the page's own handler gives for a missing booking.
+func (s *Server) galleryUnknown(w http.ResponseWriter, r *http.Request) {
+	writeNotFound(w)
+}

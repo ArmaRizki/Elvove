@@ -42,8 +42,12 @@ func syncBookingForTest(t *testing.T, server *Server, token, name string) galler
 	t.Helper()
 	var id int64
 	err := server.Store.Pool.QueryRow(context.Background(),
-		`INSERT INTO bookings(name, package_title, selection_token, raw_folder_id)
-		 VALUES ($1,'Test Package',$2,'test-folder') RETURNING id`, name, token).Scan(&id)
+		// The columns the bookings table has required since the first schema:
+		// a row without them is not a booking the API could have written.
+		`INSERT INTO bookings(name, email, phone, event_date, terms_accepted, status,
+		                      package_title, selection_token, raw_folder_id)
+		 VALUES ($1,'sync@test.local','0800000000','2030-01-01',true,'PENDING',
+		         'Test Package',$2,'test-folder') RETURNING id`, name, token).Scan(&id)
 	if err != nil {
 		t.Fatalf("insert booking: %v", err)
 	}
