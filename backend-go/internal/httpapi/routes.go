@@ -108,26 +108,7 @@ func (s *Server) Handler() http.Handler {
 		// production confirms (403 would leak that the path exists).
 		writeEmpty(w, http.StatusUnauthorized)
 	}))
-	mux.Handle("/uploads/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		name := strings.TrimPrefix(r.URL.Path, "/uploads/")
-		decoded, decodeErr := url.PathUnescape(name)
-		clean := filepath.Clean(decoded)
-		if decodeErr != nil || clean == "originals" || strings.HasPrefix(clean, "originals"+string(filepath.Separator)) || filepath.IsAbs(decoded) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
-			writeNotFound(w)
-			return
-		}
-		root, err := filepath.Abs(s.Config.UploadDir)
-		resolved, resolveErr := filepath.Abs(filepath.Join(root, clean))
-		if err != nil || resolveErr != nil || (resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator))) {
-			writeNotFound(w)
-			return
-		}
-		if info, err := os.Stat(resolved); err != nil || !info.Mode().IsRegular() {
-			writeNotFound(w)
-			return
-		}
-		http.StripPrefix("/uploads/", http.FileServer(http.Dir(s.Config.UploadDir))).ServeHTTP(w, r)
-	}))
+	mux.Handle("/uploads/", s.uploadsHandler())
 
 	admin := http.NewServeMux()
 	admin.HandleFunc("GET /api/admin/dashboard/summary", s.dashboardSummary)
@@ -197,6 +178,46 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	return s.cors(s.recover(mux))
+}
+
+// uploadsHandler serves the files the site publishes under UPLOAD_DIR: photo
+// thumbnails and previews. The originals live in UPLOAD_DIR/originals and are
+// admin-only, and no request may walk out of UPLOAD_DIR.
+//
+// The file opened here is the file served: http.ServeContent takes this exact
+// handle instead of a second mapping of the request path. That keeps the rule
+// in one place, and it drops one quirk of http.FileServer: a trailing slash on
+// a file (/uploads/thumbnails/a.webp/) used to answer a 301 to "../a.webp", so
+// the only URL that served the photo was not the URL that was checked.
+func (s *Server) uploadsHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		name := strings.TrimPrefix(r.URL.Path, "/uploads/")
+		decoded, decodeErr := url.PathUnescape(name)
+		clean := filepath.Clean(decoded)
+		if decodeErr != nil || clean == "originals" || strings.HasPrefix(clean, "originals"+string(filepath.Separator)) || filepath.IsAbs(decoded) || clean == "." || clean == ".." || strings.HasPrefix(clean, ".."+string(filepath.Separator)) {
+			writeNotFound(w)
+			return
+		}
+		root, err := filepath.Abs(s.Config.UploadDir)
+		resolved, resolveErr := filepath.Abs(filepath.Join(root, clean))
+		if err != nil || resolveErr != nil || (resolved != root && !strings.HasPrefix(resolved, root+string(filepath.Separator))) {
+			writeNotFound(w)
+			return
+		}
+		// Serve the handle that was checked, not a re-mapping of r.URL.Path.
+		file, err := os.Open(resolved)
+		if err != nil {
+			writeNotFound(w)
+			return
+		}
+		defer file.Close()
+		info, err := file.Stat()
+		if err != nil || !info.Mode().IsRegular() {
+			writeNotFound(w)
+			return
+		}
+		http.ServeContent(w, r, info.Name(), info.ModTime(), file)
+	})
 }
 
 func (s *Server) cors(next http.Handler) http.Handler {
