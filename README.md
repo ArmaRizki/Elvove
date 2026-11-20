@@ -396,6 +396,14 @@ nginx frontend and the proxy, with the database and uploads on named/bind mounts
   dead card. Point `DEST` at another disk for a copy that does. Both verify the
   archive before keeping it, and both restores were run: the database row counts
   and the image checksums matched.
+- On the production server the two disks are deliberately crossed, so either one
+  dying leaves a copy of everything: Postgres' own volume lives on the SD card
+  (`/mnt/sdcard/docker`) while the images and the dumps are on `/`, and
+  `backup-db.sh` is run with `MIRROR=/mnt/sdcard/backups/elvove-db` so a dump
+  also lands on the SD card, and `backup-uploads.sh` with
+  `DEST=/mnt/sdcard/backups/elvove-uploads`. A mirror that cannot be written
+  fails the run instead of being skipped quietly — a second copy that silently
+  stops being written is worse than none.
 
 ### HSTS
 
