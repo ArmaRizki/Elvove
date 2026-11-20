@@ -407,16 +407,31 @@ Two switches in the Cloudflare dashboard, in this order:
 
 1. **Always Use HTTPS** — SSL/TLS → Edge Certificates. Check it with
    `curl -o /dev/null -w '%{http_code} %{redirect_url}\n' http://elvove.site/`;
-   it should answer `301 https://elvove.site/`. On 2026-11-20 it answered `200`,
-   so this switch was off and the cleartext copy was a real, reachable site.
-   HSTS assumes the visitor already arrived over HTTPS once; this is what
-   guarantees it.
-2. **HTTP Strict Transport Security** — same page, *Enable HSTS*. Start with
-   max-age **15552000** (180 days). Leave *include subdomains* off unless every
-   subdomain serves HTTPS — with it on, a subdomain without a certificate is
-   unreachable, not merely unencrypted. Leave *preload* off for now: the preload
-   list is cached by browsers for months, and a site that stops serving HTTPS
-   becomes unreachable rather than merely insecure.
+   it should answer `301 https://elvove.site/`. HSTS assumes the visitor already
+   arrived over HTTPS once; this is what guarantees it. **On since 2026-11-20**
+   (before that, `http://` answered 200 and the cleartext site was reachable).
+2. **HTTP Strict Transport Security** — same page, *Enable HSTS*, max-age
+   **15552000** (180 days), *include subdomains* and *preload* **off**.
+   **On since 2026-11-20.** `include subdomains` stays off because `www` is not
+   in DNS: with it on, any subdomain that does not serve HTTPS becomes
+   unreachable, not merely unencrypted. `preload` stays off because the browser
+   list is cached for months and a site that stops serving HTTPS becomes
+   unreachable rather than merely insecure.
+
+Because the header is now being sent, **the certificate must not lapse**: the
+edge certificate is a Let's Encrypt one that Cloudflare renews, valid
+2026-11-06 → 2027-02-04. If it ever stops renewing, visitors who already have
+the header cannot reach the site at all — and they cannot click through a
+warning, because HSTS removes that option. Check the date rather than trusting
+renewal:
+
+```sh
+echo | openssl s_client -servername elvove.site -connect elvove.site:443 2>/dev/null \
+  | openssl x509 -noout -dates
+```
+
+**Do not turn off the proxy or pause Cloudflare** while the header is live; both
+make the site unreachable for existing visitors for up to 180 days.
 
 `scripts/check-hsts.sh` reports which step is still missing, and what the header
 actually says:
@@ -427,12 +442,6 @@ actually says:
 
 It exits non-zero until both are done, and distinguishes a missing header from a
 header that is present but too short to be useful.
-
-**The cost of getting this wrong:** once a browser has the header, it refuses
-plain HTTP to that host until max-age expires. Do not enable it while the
-certificate is close to expiring, and do not turn off the proxy or pause
-Cloudflare afterwards — that makes the site unreachable for existing visitors,
-not just insecure.
 
 Backend environment: `DB_*` or `DB_URL`, `JWT_SECRET`, `SMTP_ENCRYPTION_KEY`,
 `FRONTEND_URL`, `MAIL_SITE_URL`, `MAIL_ADMIN_URL`, `ADMIN_*`,
