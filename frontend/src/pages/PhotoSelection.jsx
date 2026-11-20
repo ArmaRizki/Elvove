@@ -267,11 +267,11 @@ export default function PhotoSelection() {
                 aria-pressed={chosen}
                 className={`block h-full w-full ${locked ? "cursor-default" : "cursor-pointer"}`}
               >
-                <img
-                  src={`${API_BASE_URL}${galleryApi.photoUrl(token, photo.id)}`}
+                <PreviewImage
+                  token={token}
+                  id={photo.id}
                   alt={photo.name}
-                  loading="lazy"
-                  decoding="async"
+                  width={400}
                   className="h-full w-full object-cover"
                 />
                 {chosen && (
@@ -353,11 +353,18 @@ export default function PhotoSelection() {
           </div>
 
           <div className="relative flex min-h-0 flex-1 items-center justify-center px-2 pb-4 sm:px-14">
-            <img
-              src={`${API_BASE_URL}${galleryApi.photoUrl(token, photos[viewer].id)}`}
+            <PreviewImage
+              token={token}
+              id={photos[viewer].id}
               alt={photos[viewer].name}
-              onClick={(event) => event.stopPropagation()}
+              width={1600}
               className="max-h-full max-w-full object-contain"
+              onClick={(event) => event.stopPropagation()}
+              fallback={
+                <div className="flex h-64 w-64 items-center justify-center text-white/70">
+                  <LoaderCircle size={28} className="animate-spin" />
+                </div>
+              }
             />
             {viewer > 0 && (
               <button
@@ -389,5 +396,36 @@ export default function PhotoSelection() {
         </div>
       )}
     </div>
+  );
+}
+
+/**
+ * One photo on the selection page.
+ *
+ * <p>The picture Drive keeps for the photo is shown first: it is already
+ * resized and named by the file id, so a folder of three hundred photos fills in
+ * at once and the server converts nothing. A photo whose thumbnail fails falls
+ * back to the page's own WebP preview one request at a time, so a broken
+ * thumbnail never costs the whole grid.</p>
+ */
+function PreviewImage({ token, id, alt, width, className, fallback, onClick }) {
+  const [status, setStatus] = useState("thumbnail");
+  if (status === "both") {
+    return fallback ?? <span className={className} aria-hidden="true" />;
+  }
+  const src =
+    status === "thumbnail"
+      ? galleryApi.driveThumbnail(id, width)
+      : `${API_BASE_URL}${galleryApi.photoUrl(token, id)}`;
+  return (
+    <img
+      src={src}
+      alt={alt}
+      loading={width > 400 ? undefined : "lazy"}
+      decoding="async"
+      onClick={onClick}
+      className={className}
+      onError={() => setStatus(status === "thumbnail" ? "preview" : "both")}
+    />
   );
 }

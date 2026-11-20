@@ -115,7 +115,6 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 		if err := s.syncBookingPhotos(r.Context(), booking.ID, cached.files); err != nil {
 			return nil, err
 		}
-		s.warmGalleryPreviews(booking.ID)
 		return cached.files, nil
 	}
 	// The photographer sorts the photos into subfolders, so the whole tree is
@@ -130,7 +129,6 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 	s.galleryListMu.Lock()
 	s.galleryListed[booking.RawFolderID] = galleryListing{files: files, at: time.Now()}
 	s.galleryListMu.Unlock()
-	s.warmGalleryPreviews(booking.ID)
 	return files, nil
 }
 
@@ -277,8 +275,7 @@ func (s *Server) galleryPhoto(w http.ResponseWriter, r *http.Request) {
 	original := filepath.Join(s.Config.UploadDir, "originals", "gallery", token, fileID+".source")
 	data, err := os.ReadFile(cache)
 	if err != nil {
-		// One conversion per photo even when the grid fires six requests at once.
-		// The key matches the background warm-up, so the two never duplicate work.
+		// One conversion per photo even when the page asks for it twice at once.
 		unlock := s.galleryLock(fmt.Sprintf("%d/%s", booking.ID, fileID))
 		data, webpID, err = s.convertGalleryPhoto(r.Context(), client, booking, fileID, name, webpID, cache, original)
 		unlock()
@@ -404,9 +401,9 @@ func (s *Server) uploadGalleryWebP(ctx context.Context, client *drive.Client, bo
 	if webpID != "" {
 		return webpID
 	}
-	// The caller read webp_file_id before taking the per-photo lock; the warm-up
-	// may have uploaded the same preview while it waited, so the row wins over
-	// that stale empty value and Drive never holds two copies.
+	// The caller read webp_file_id before taking the per-photo lock; another
+	// request may have uploaded the same preview while it waited, so the row wins
+	// over that stale empty value and Drive never holds two copies.
 	var stored string
 	if err := s.Store.Pool.QueryRow(ctx, `SELECT COALESCE(webp_file_id,'') FROM booking_photos WHERE booking_id=$1 AND drive_file_id=$2`, booking.ID, fileID).Scan(&stored); err == nil && stored != "" {
 		return stored
@@ -436,85 +433,6 @@ func (s *Server) uploadGalleryWebP(ctx context.Context, client *drive.Client, bo
 		log.Printf("gallery webp save booking %d: %v", booking.ID, err)
 	}
 	return uploaded
-}
-
-// warmGalleryPreviews prepares a booking's previews in the background, so the
-// client opens a page of ready files instead of waiting for dozens of originals
-// to download and convert. It starts whenever a listing or a folder check finds
-// photos, the two moments a new upload becomes visible to the site.
-func (s *Server) warmGalleryPreviews(bookingID int64) {
-	s.galleryWarmMu.Lock()
-	if s.galleryWarming[bookingID] {
-		s.galleryWarmMu.Unlock()
-		return
-	}
-	s.galleryWarming[bookingID] = true
-	s.galleryWarmMu.Unlock()
-	go func() {
-		defer func() {
-			s.galleryWarmMu.Lock()
-			delete(s.galleryWarming, bookingID)
-			s.galleryWarmMu.Unlock()
-		}()
-		s.warmGalleryPreviewsNow(bookingID)
-	}()
-}
-
-// warmGalleryPreviewsNow converts every photo still missing a preview, one at a
-// time, and stops when the page is served. It uses its own context because the
-// request that discovered the photos ends long before the folder is done.
-func (s *Server) warmGalleryPreviewsNow(bookingID int64) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
-	defer cancel()
-	client := s.driveClientFor(ctx)
-	if !client.Enabled() {
-		return
-	}
-	var token, rawFolderID, webpFolderID string
-	err := s.Store.Pool.QueryRow(ctx, `SELECT COALESCE(selection_token,''), COALESCE(raw_folder_id,''), COALESCE(folder_webp_id,'')
-		FROM bookings WHERE id=$1`, bookingID).Scan(&token, &rawFolderID, &webpFolderID)
-	if err != nil || token == "" || rawFolderID == "" {
-		return
-	}
-	rows, err := s.Store.Pool.Query(ctx, `SELECT drive_file_id, file_name, COALESCE(webp_file_id,'')
-		FROM booking_photos WHERE booking_id=$1 AND COALESCE(webp_file_id,'')=''`, bookingID)
-	if err != nil {
-		log.Printf("gallery warm list booking %d: %v", bookingID, err)
-		return
-	}
-	type pendingPhoto struct{ id, name, webpID string }
-	pending := make([]pendingPhoto, 0, 16)
-	for rows.Next() {
-		var p pendingPhoto
-		if err := rows.Scan(&p.id, &p.name, &p.webpID); err != nil {
-			rows.Close()
-			log.Printf("gallery warm scan booking %d: %v", bookingID, err)
-			return
-		}
-		pending = append(pending, p)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		log.Printf("gallery warm list booking %d: %v", bookingID, err)
-		return
-	}
-	booking := galleryBooking{ID: bookingID, RawFolderID: rawFolderID, WebpFolderID: webpFolderID}
-	for _, p := range pending {
-		if ctx.Err() != nil {
-			return
-		}
-		cache := filepath.Join(s.Config.UploadDir, "gallery", token, p.id+".webp")
-		original := filepath.Join(s.Config.UploadDir, "originals", "gallery", token, p.id+".source")
-		unlock := s.galleryLock(fmt.Sprintf("%d/%s", bookingID, p.id))
-		_, _, err := s.convertGalleryPhoto(ctx, client, booking, p.id, p.name, p.webpID, cache, original)
-		unlock()
-		if err != nil {
-			log.Printf("gallery warm %d/%s (%s): %v", bookingID, p.id, p.name, err)
-			if ctx.Err() != nil {
-				return
-			}
-		}
-	}
 }
 
 // saveSelection replaces the picked set. The rules are the ones the page shows:

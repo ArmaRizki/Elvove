@@ -175,12 +175,13 @@ terms-and-conditions.
 - The page shows a grid of previews. Each preview is converted from the original
   to WebP (1600 px, q78) by `cwebp`, uploaded to a `webp` subfolder of the raw
   folder, and cached on disk under `UPLOAD_DIR/gallery/<token>/`, so Drive is
-  read once per photo. Listing the folder or pressing **Periksa** starts a
-  background pass that converts the photos still missing a preview, so the
-  client opens ready files instead of waiting on 45 MP originals; when the local
-  cache is wiped, the smaller Drive `webp` copy refills it. Two conversions run
-  at a time — a page asking for dozens at once used to exhaust memory and leave
-  broken images.
+  read once per photo. The grid and the full-screen viewer show the thumbnail
+  Drive already keeps for each photo (`drive.google.com/thumbnail?id=<id>`), so
+  a folder of three hundred photos fills in at once and the server converts
+  nothing; this endpoint is the fallback when a thumbnail fails, one request at
+  a time. When the local cache is wiped, the smaller Drive `webp` copy refills
+  it. Two conversions run at a time — a page asking for dozens at once used to
+  exhaust memory and leave broken images.
 - A tile is a button: tapping it picks or unpicks the photo. The expand icon on
   its corner opens the same preview full screen, uncropped, with the name, the
   position in the folder, arrow keys / buttons for the next photo and Escape to
@@ -411,7 +412,7 @@ compose.yml          local stack
   carrying the link and the settlement notice carrying none).
 - `backend-go/scripts/verify-gallery.sh` covers the photo selection page and the
   Drive connection with 60 assertions against a stub Drive: token access, folder
-  validation, the package quota, the background WebP preview pass, the
+  validation, the package quota, the WebP preview, the
   `foto terpilih` copy, the lock after submit, the `/admin/drive` setup (client
   storage, the signed OAuth state, the callback, the parent folder), the
   backfill, the automatic folder of a new booking, the rename of an older

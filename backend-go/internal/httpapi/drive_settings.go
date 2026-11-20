@@ -656,9 +656,6 @@ func (s *Server) createBookingDriveFolder(w http.ResponseWriter, r *http.Request
 		}
 		return
 	}
-	// The folder is checked right before the selection e-mail goes out, so this
-	// is the moment to prepare the previews the client is about to open.
-	s.warmGalleryPreviews(id)
 	booking, err := s.fetchBooking(r, id)
 	if err != nil {
 		writeError(w, 404, "Pemesanan tidak ditemukan.")
