@@ -41,6 +41,11 @@ the same database and the same JSON contract:
   `status`, `error`, `message`, `fieldErrors`).
 - JWT HS256/384/512 verification, bcrypt hashes reused from the existing table.
 - Rate limiting moved to a sliding window per key, as the Java service did.
+- Gallery routes are limited per selection token (`30`/min and `300`/hour for the
+  listing, `600`/min and `5000`/hour for previews, `60`/min for a save or a
+  submit). The token is the only key to a booking's folder, and the caller's
+  address cannot tell visitors apart behind the tunnel, where everyone shares
+  one address.
 - All timestamps use `Asia/Jakarta` wall clock, matching the old JVM's
   `LocalDateTime.now()`; the pool opens every connection with
   `timezone=Asia/Jakarta`.
@@ -286,7 +291,7 @@ terms-and-conditions.
 | SQL logging | `show-sql: true` | off by default (`JPA_SHOW_SQL` to enable) |
 | CORS | one origin, default `localhost:5173` | comma-separated `FRONTEND_URL`, explicit allow-list |
 | Login | no throttling | 20 attempts/15 min per IP, 5 failures/15 min per username |
-| Booking form | 5/10 min | unchanged |
+| Booking form | 5/10 min | 3/min, 10/hour and 20/day per address; a refused request records nothing |
 | Uploads | extension in a 5-item list | magic-byte signature, `.gif` dropped, path-traversal guard |
 | Originals | publicly served | admin-only |
 | Reverse proxy | none | nginx with `server_tokens off`, security headers and a login rate-limit zone |

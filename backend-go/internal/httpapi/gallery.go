@@ -3,6 +3,7 @@ package httpapi
 import (
 	"context"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -110,9 +111,10 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 	cached, ok := s.galleryListed[booking.RawFolderID]
 	s.galleryListMu.Unlock()
 	if ok {
-		// The rows are per booking, so they are synced even on a cache hit: a
-		// second booking on the same folder would otherwise never get them.
-		if err := s.syncBookingPhotos(r.Context(), booking.ID, cached.files); err != nil {
+		// The rows are per booking, so a second booking on the same folder still
+		// needs them. The fingerprint tells the two cases apart, so a reload of
+		// the same page does not rewrite every row for nothing.
+		if _, err := s.syncBookingPhotos(r.Context(), booking, cached.files, s.syncedFor(booking)); err != nil {
 			return nil, err
 		}
 		return cached.files, nil
@@ -123,11 +125,12 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 	if err != nil {
 		return nil, err
 	}
-	if err := s.syncBookingPhotos(r.Context(), booking.ID, files); err != nil {
+	fingerprint, err := s.syncBookingPhotos(r.Context(), booking, files, "")
+	if err != nil {
 		return nil, err
 	}
 	s.galleryListMu.Lock()
-	s.galleryListed[booking.RawFolderID] = galleryListing{files: files, at: time.Now()}
+	s.galleryListed[booking.RawFolderID] = galleryListing{files: files, at: time.Now(), synced: map[int64]string{booking.ID: fingerprint}}
 	s.galleryListMu.Unlock()
 	return files, nil
 }
@@ -136,7 +139,16 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 // new are added, ones that left the folder are dropped unless the client picked
 // them. The Drive listing itself may be shared with another booking; these rows
 // may not.
-func (s *Server) syncBookingPhotos(ctx context.Context, bookingID int64, files []drive.File) error {
+//
+// It returns the fingerprint of the files the rows now hold, and writes nothing
+// when known already matches it. The listing is read on every page load, so a
+// folder that has not changed must not have its rows rewritten each time.
+func (s *Server) syncBookingPhotos(ctx context.Context, booking galleryBooking, files []drive.File, known string) (string, error) {
+	fingerprint := galleryFingerprint(files)
+	if known == fingerprint {
+		s.rememberSynced(booking.RawFolderID, booking.ID, fingerprint)
+		return fingerprint, nil
+	}
 	ids := make([]string, 0, len(files))
 	names := make([]string, 0, len(files))
 	widths := make([]int32, 0, len(files))
@@ -153,21 +165,62 @@ func (s *Server) syncBookingPhotos(ctx context.Context, bookingID int64, files [
 			SELECT $1, u.id, u.name, NULLIF(u.width,0), NULLIF(u.height,0)
 			FROM unnest($2::text[], $3::text[], $4::int[], $5::int[]) AS u(id,name,width,height)
 			ON CONFLICT (booking_id,drive_file_id) DO UPDATE SET file_name=EXCLUDED.file_name,width=EXCLUDED.width,height=EXCLUDED.height,updated_at=NOW()`,
-			bookingID, ids, names, widths, heights); err != nil {
-			return err
+			booking.ID, ids, names, widths, heights); err != nil {
+			return "", err
 		}
 	}
 	// A photo the photographer removed from the folder leaves the page, but a
 	// photo the client already picked stays: that choice is not the
 	// photographer's to erase.
-	_, err := s.Store.Exec(ctx, `DELETE FROM booking_photos WHERE booking_id=$1 AND NOT selected AND NOT (drive_file_id = ANY($2))`, bookingID, ids)
-	return err
+	if _, err := s.Store.Exec(ctx, `DELETE FROM booking_photos WHERE booking_id=$1 AND NOT selected AND NOT (drive_file_id = ANY($2))`, booking.ID, ids); err != nil {
+		return "", err
+	}
+	s.rememberSynced(booking.RawFolderID, booking.ID, fingerprint)
+	return fingerprint, nil
+}
+
+// syncedFor is the fingerprint this booking's rows are known to hold, or "" when
+// unknown, so the sync can skip its writes.
+func (s *Server) syncedFor(booking galleryBooking) string {
+	s.galleryListMu.Lock()
+	defer s.galleryListMu.Unlock()
+	return s.galleryListed[booking.RawFolderID].synced[booking.ID]
+}
+
+// rememberSynced notes that booking's rows hold exactly the files fingerprint
+// describes. It does nothing when the folder has no cached listing yet, which is
+// the case while the first read is still writing its rows.
+func (s *Server) rememberSynced(folderID string, bookingID int64, fingerprint string) {
+	s.galleryListMu.Lock()
+	defer s.galleryListMu.Unlock()
+	entry, ok := s.galleryListed[folderID]
+	if !ok {
+		return
+	}
+	if entry.synced == nil {
+		entry.synced = make(map[int64]string, 1)
+	}
+	entry.synced[bookingID] = fingerprint
+	s.galleryListed[folderID] = entry
+}
+
+// galleryFingerprint names one folder listing: the files it holds and the details
+// its rows carry. Two listings with the same fingerprint produce the same rows.
+func galleryFingerprint(files []drive.File) string {
+	digest := sha256.New()
+	for _, f := range files {
+		fmt.Fprintf(digest, "%s\x00%s\x00%d\x00%d\n", f.ID, f.Name, f.Width, f.Height)
+	}
+	return hex.EncodeToString(digest.Sum(nil))
 }
 
 // galleryListing is one raw folder's Drive listing, kept for listingTTL.
 type galleryListing struct {
 	files []drive.File
 	at    time.Time
+	// synced is the fingerprint of the files each booking's rows hold, so a
+	// second read of the same, unchanged listing writes nothing.
+	synced map[int64]string
 }
 
 // listingTTL is how long a listing is reused. A photo added to the folder shows

@@ -108,3 +108,38 @@ func TestBookingValidationDoesNotConsumeRateLimit(t *testing.T) {
 		}
 	}
 }
+
+// TestBookingRateLimitDoesNotSpendSlotsOnRefusedRequests walks the windows a
+// caller reaches on the booking form: a burst of three, then ten an hour, then
+// twenty a day.
+func TestBookingRateLimitDoesNotSpendSlotsOnRefusedRequests(t *testing.T) {
+	limiter := NewRateLimiter()
+	server := &Server{Limiter: limiter}
+	const address = "203.0.113.77"
+	allowed := 0
+	for i := 0; i < 40; i++ {
+		if server.bookingRateLimit(address) {
+			allowed++
+		}
+	}
+	// The burst window lets three through; the fourth is refused, and from then
+	// on a refusal must not touch the longer windows.
+	if allowed != bookingBurstPerMinute {
+		t.Fatalf("%d bookings allowed, want %d", allowed, bookingBurstPerMinute)
+	}
+	limiter.mu.Lock()
+	burst := len(limiter.counters["booking:"+address+":burst"].times)
+	hour := len(limiter.counters["booking:"+address+":hour"].times)
+	day := len(limiter.counters["booking:"+address+":day"].times)
+	limiter.mu.Unlock()
+	if burst != bookingBurstPerMinute {
+		t.Fatalf("burst window holds %d events, want %d", burst, bookingBurstPerMinute)
+	}
+	if hour != bookingBurstPerMinute || day != bookingBurstPerMinute {
+		t.Fatalf("hour=%d day=%d, want %d each: a refused booking was recorded", hour, day, bookingBurstPerMinute)
+	}
+	// Another address keeps its own windows.
+	if !server.bookingRateLimit("198.51.100.4") {
+		t.Fatal("another address was refused")
+	}
+}

@@ -1,6 +1,7 @@
 package httpapi
 
 import (
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -19,6 +20,70 @@ func TestRateLimiterKeepsOneWindowPerKey(t *testing.T) {
 	limiter.Allow("booking:203.0.113.9", 5, 10*time.Millisecond)
 	if limiter.Allow("login-ip:203.0.113.9", 1, 200*time.Millisecond) {
 		t.Fatal("login window was reset by the booking endpoint's shorter window")
+	}
+}
+
+func TestRateLimiterKeepsItsMapBounded(t *testing.T) {
+	// The sweep runs at most once a minute, and sooner only when a request finds
+	// the map past sweepKeys, so it is driven by traffic in both ranges. A map
+	// already over the limit is swept by the next request; a small map is swept
+	// by the first request after the interval.
+	sweepDue := func(limiter *RateLimiter) {
+		limiter.mu.Lock()
+		limiter.lastSweep = time.Now().Add(-2 * sweepInterval)
+		limiter.mu.Unlock()
+	}
+	for _, keys := range []int{50, 12_000} {
+		limiter := NewRateLimiter()
+		// Every request from a new token or address makes a key. One key per
+		// request would grow without end, so the sweep must drop the keys
+		// whose window has emptied.
+		span := 20 * time.Millisecond
+		for i := 0; i < keys; i++ {
+			limiter.Allow(fmt.Sprintf("gallery:token%05d:list", i), 5, span)
+		}
+		if keys <= sweepKeys {
+			sweepDue(limiter)
+		}
+		time.Sleep(3 * span)
+		limiter.Allow("gallery:fresh:list", 5, span)
+		if keys > sweepKeys {
+			// That request swept once, then added its own key.
+			sweepDue(limiter)
+			limiter.Allow("gallery:fresh:list", 5, span)
+		}
+		limiter.mu.Lock()
+		kept := len(limiter.counters)
+		limiter.mu.Unlock()
+		if kept > 2 {
+			t.Fatalf("%d keys: %d kept after their windows emptied, want at most 2", keys, kept)
+		}
+	}
+}
+
+func TestRateLimiterPeekCreatesNoKey(t *testing.T) {
+	limiter := NewRateLimiter()
+	// The per-username login check peeks before a password is verified, so a
+	// stranger can make it run with any username. A peek must not reserve
+	// memory for a key it only read.
+	if limiter.IsLimited("login-user:nobody", 5, time.Minute) {
+		t.Fatal("an unknown key is not limited")
+	}
+	limiter.mu.Lock()
+	keys := len(limiter.counters)
+	limiter.mu.Unlock()
+	if keys != 0 {
+		t.Fatalf("IsLimited created %d keys, want 0", keys)
+	}
+	limiter.Record("login-user:someone", time.Minute)
+	if limiter.IsLimited("login-user:nobody", 5, time.Minute) {
+		t.Fatal("another key's events must not count")
+	}
+	for i := 0; i < 4; i++ {
+		limiter.Record("login-user:someone", time.Minute)
+	}
+	if !limiter.IsLimited("login-user:someone", 5, time.Minute) {
+		t.Fatal("5 recorded events must read as limited")
 	}
 }
 

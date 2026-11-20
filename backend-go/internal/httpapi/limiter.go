@@ -18,7 +18,10 @@ type counter struct {
 
 const (
 	sweepInterval = time.Minute
-	sweepKeys     = 10_000
+	// sweepKeys is how many keys the sweep leaves alone between sweeps. Past it
+	// every request sweeps first, so the map follows the traffic it is counting
+	// instead of a clock: one key per token and address that is actually in use.
+	sweepKeys = 10_000
 )
 
 type RateLimiter struct {
@@ -46,15 +49,35 @@ func (c *counter) prune(now time.Time) {
 	c.times = c.times[i:]
 }
 
-// entry returns the key's window, dropping the events that have expired.
-func (l *RateLimiter) entry(key string, span time.Duration, now time.Time) *counter {
+// live returns the key's window, dropping the events that have expired. It
+// answers nil when the key has no events left at all, so a caller that only
+// wants to read can skip the write; entry creates the record instead.
+func (l *RateLimiter) live(key string, span time.Duration, now time.Time) *counter {
 	c := l.counters[key]
 	if c == nil {
-		c = &counter{}
-		l.counters[key] = c
+		return nil
 	}
 	c.span = span
 	c.prune(now)
+	if len(c.times) == 0 {
+		return nil
+	}
+	return c
+}
+
+// entry returns the key's window, creating the record when the key is new.
+func (l *RateLimiter) entry(key string, span time.Duration, now time.Time) *counter {
+	if c := l.live(key, span, now); c != nil {
+		return c
+	}
+	return l.reset(key, span)
+}
+
+// reset drops whatever the key held and starts a fresh window. Callers hold the
+// lock.
+func (l *RateLimiter) reset(key string, span time.Duration) *counter {
+	c := &counter{span: span}
+	l.counters[key] = c
 	return c
 }
 
@@ -78,7 +101,12 @@ func (l *RateLimiter) Allow(key string, max int, span time.Duration) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.maybeSweep(now)
-	c := l.entry(key, span, now)
+	c := l.live(key, span, now)
+	if c == nil {
+		// The sweep may just have dropped the key, so the record is made now
+		// rather than on every retry.
+		c = l.reset(key, span)
+	}
 	if len(c.times) >= max {
 		return false
 	}
@@ -112,7 +140,12 @@ func (l *RateLimiter) IsLimited(key string, max int, span time.Duration) bool {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.maybeSweep(now)
-	return len(l.entry(key, span, now).times) >= max
+	if c := l.live(key, span, now); c != nil {
+		return len(c.times) >= max
+	}
+	// A key with no event in the window holds 0, so it is not limited. Creating
+	// its record here would only turn a read into a write.
+	return 0 >= max
 }
 
 // Record adds one event for key (Java's RateLimiterService.record).
@@ -121,7 +154,10 @@ func (l *RateLimiter) Record(key string, span time.Duration) {
 	l.mu.Lock()
 	defer l.mu.Unlock()
 	l.maybeSweep(now)
-	c := l.entry(key, span, now)
+	c := l.live(key, span, now)
+	if c == nil {
+		c = l.reset(key, span)
+	}
 	c.times = append(c.times, now)
 }
 

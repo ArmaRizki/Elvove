@@ -155,10 +155,10 @@ func (s *Server) Handler() http.Handler {
 	// The client photo-selection page. The token in the path is the only key:
 	// without it there is nothing to guess, so these stay outside the admin
 	// middleware.
-	mux.HandleFunc("GET /api/gallery/{token}", s.getGallery)
-	mux.HandleFunc("GET /api/gallery/{token}/photos/{id}", s.galleryPhoto)
-	mux.HandleFunc("PUT /api/gallery/{token}/selection", s.saveSelection)
-	mux.HandleFunc("POST /api/gallery/{token}/submit", s.submitSelection)
+	mux.HandleFunc("GET /api/gallery/{token}", s.limitGallery(s.getGallery))
+	mux.HandleFunc("GET /api/gallery/{token}/photos/{id}", s.limitGallery(s.galleryPhoto))
+	mux.HandleFunc("PUT /api/gallery/{token}/selection", s.limitGallery(s.saveSelection))
+	mux.HandleFunc("POST /api/gallery/{token}/submit", s.limitGallery(s.submitSelection))
 	mux.HandleFunc("GET /api/admin/drive/callback", s.driveCallback)
 	mux.HandleFunc("POST /api/bookings", s.createBooking)
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
@@ -178,6 +178,56 @@ func (s *Server) Handler() http.Handler {
 	})
 
 	return s.cors(s.recover(mux))
+}
+
+// The client photo page, limited per selection token.
+//
+// The token is the only key to a booking's folder, and the limiter keyed on the
+// caller's address cannot tell visitors apart behind the tunnel, where everyone
+// shares one address. These windows follow the token instead, so one page — or
+// one leaked link — cannot spend the whole server's quota on Drive walks and
+// photo conversions.
+const (
+	// A page load asks for the list, and the test suite and a reload ask several
+	// times in a row.
+	galleryListPerMinute = 30
+	// Opening a folder walks the whole tree on the first request and reuses the
+	// listing for a minute after that.
+	galleryListPerHour = 300
+	// One preview per photo, plus a retry after a failure.
+	galleryPhotoPerMinute = 600
+	galleryPhotoPerHour   = 5000
+	// Saving and submitting are one tap each.
+	galleryWritePerMinute = 60
+)
+
+// limitGallery applies the window that belongs to the route: the photo route
+// carries an id, so it is told apart from the listing by its last segment.
+func (s *Server) limitGallery(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		if s.Limiter == nil {
+			next(w, r)
+			return
+		}
+		token := r.PathValue("token")
+		key := "gallery:" + token
+		var allowed bool
+		switch {
+		case strings.HasSuffix(r.URL.Path, "/photos/"+r.PathValue("id")):
+			allowed = s.Limiter.Allow(key+":photo", galleryPhotoPerMinute, time.Minute) &&
+				s.Limiter.Allow(key+":photo:hour", galleryPhotoPerHour, time.Hour)
+		case r.Method == http.MethodGet:
+			allowed = s.Limiter.Allow(key+":list", galleryListPerMinute, time.Minute) &&
+				s.Limiter.Allow(key+":list:hour", galleryListPerHour, time.Hour)
+		default:
+			allowed = s.Limiter.Allow(key+":write", galleryWritePerMinute, time.Minute)
+		}
+		if !allowed {
+			writeError(w, http.StatusTooManyRequests, "Terlalu banyak permintaan. Tunggu sebentar, lalu coba lagi.")
+			return
+		}
+		next(w, r)
+	}
 }
 
 // uploadsHandler serves the files the site publishes under UPLOAD_DIR: photo
@@ -540,6 +590,34 @@ func (s *Server) getBooking(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, http.StatusOK, booking)
 }
 
+// The booking form's windows, all keyed on the caller's address: a burst (three
+// at once), a sustained rate (ten an hour) and a daily cap (twenty a day). A
+// real client books once, so these stop a script that walks the form.
+const (
+	bookingBurstPerMinute = 3
+	bookingPerHour        = 10
+	bookingPerDay         = 20
+)
+
+// bookingRateLimit records one booking for the address and reports whether the
+// windows still allow it.
+//
+// Every window is read before any is recorded: recording while checking would
+// let a request the burst window refuses spend a slot in the hourly and daily
+// windows, so a caller could hold its own hour shut by looping refused requests.
+func (s *Server) bookingRateLimit(address string) bool {
+	key := "booking:" + address
+	if s.Limiter.IsLimited(key+":burst", bookingBurstPerMinute, time.Minute) ||
+		s.Limiter.IsLimited(key+":hour", bookingPerHour, time.Hour) ||
+		s.Limiter.IsLimited(key+":day", bookingPerDay, 24*time.Hour) {
+		return false
+	}
+	s.Limiter.Record(key+":burst", time.Minute)
+	s.Limiter.Record(key+":hour", time.Hour)
+	s.Limiter.Record(key+":day", 24*time.Hour)
+	return true
+}
+
 func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	var request struct {
 		Name          string  `json:"name"`
@@ -628,13 +706,7 @@ func (s *Server) createBooking(w http.ResponseWriter, r *http.Request) {
 	}
 	// Java runs @Valid first and only then consumes the rate-limit slot, so an
 	// invalid request must not count against the booking quota for this IP.
-	// Three windows, all keyed on the caller's address: a burst (three at once),
-	// a sustained rate (ten an hour) and a daily cap (twenty a day). A real
-	// client books once, so these stop a script that walks the form.
-	ip := "booking:" + ClientIP(r)
-	if !s.Limiter.Allow(ip+":burst", 3, time.Minute) ||
-		!s.Limiter.Allow(ip+":hour", 10, time.Hour) ||
-		!s.Limiter.Allow(ip+":day", 20, 24*time.Hour) {
+	if !s.bookingRateLimit(ClientIP(r)) {
 		writeError(w, http.StatusTooManyRequests, "Too many booking requests. Please try again in a few minutes.")
 		return
 	}
