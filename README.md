@@ -397,6 +397,43 @@ nginx frontend and the proxy, with the database and uploads on named/bind mounts
   archive before keeping it, and both restores were run: the database row counts
   and the image checksums matched.
 
+### HSTS
+
+`Strict-Transport-Security` is set in Cloudflare, not here. The tunnel terminates
+TLS at Cloudflare's edge, so a header added in `nginx/default.conf` would sit
+behind the copy that actually reaches the browser, and the two could disagree.
+
+Two switches in the Cloudflare dashboard, in this order:
+
+1. **Always Use HTTPS** — SSL/TLS → Edge Certificates. Check it with
+   `curl -o /dev/null -w '%{http_code} %{redirect_url}\n' http://elvove.site/`;
+   it should answer `301 https://elvove.site/`. On 2026-11-20 it answered `200`,
+   so this switch was off and the cleartext copy was a real, reachable site.
+   HSTS assumes the visitor already arrived over HTTPS once; this is what
+   guarantees it.
+2. **HTTP Strict Transport Security** — same page, *Enable HSTS*. Start with
+   max-age **15552000** (180 days). Leave *include subdomains* off unless every
+   subdomain serves HTTPS — with it on, a subdomain without a certificate is
+   unreachable, not merely unencrypted. Leave *preload* off for now: the preload
+   list is cached by browsers for months, and a site that stops serving HTTPS
+   becomes unreachable rather than merely insecure.
+
+`scripts/check-hsts.sh` reports which step is still missing, and what the header
+actually says:
+
+```sh
+./scripts/check-hsts.sh              # defaults to https://elvove.site
+```
+
+It exits non-zero until both are done, and distinguishes a missing header from a
+header that is present but too short to be useful.
+
+**The cost of getting this wrong:** once a browser has the header, it refuses
+plain HTTP to that host until max-age expires. Do not enable it while the
+certificate is close to expiring, and do not turn off the proxy or pause
+Cloudflare afterwards — that makes the site unreachable for existing visitors,
+not just insecure.
+
 Backend environment: `DB_*` or `DB_URL`, `JWT_SECRET`, `SMTP_ENCRYPTION_KEY`,
 `FRONTEND_URL`, `MAIL_SITE_URL`, `MAIL_ADMIN_URL`, `ADMIN_*`,
 `UPLOAD_MAX_FILE_SIZE`, `UPLOAD_MAX_REQUEST_SIZE`, `PORT`, `UPLOAD_DIR`.
@@ -423,6 +460,7 @@ frontend/            React 19 + Vite + Tailwind
   src/pages/admin/   admin screens
   src/services/      axios clients and API maps
 nginx/               reverse proxy configuration
+scripts/             deploy.sh (build + ship + verify), check-hsts.sh
 compose.yml          local stack
 ```
 
