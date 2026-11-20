@@ -18,6 +18,7 @@ const Contact = lazy(() => import("./pages/Contact"));
 const Privacy = lazy(() => import("./pages/Privacy"));
 const TermsAndConditions = lazy(() => import("./pages/TermsAndConditions"));
 const PhotoSelection = lazy(() => import("./pages/PhotoSelection"));
+const PageNotFound = lazy(() => import("./pages/PageNotFound"));
 
 // Admin pages
 const Login = lazy(() => import("./pages/admin/Login"));
@@ -32,6 +33,7 @@ const SocialLinksEditor = lazy(() => import("./pages/admin/SocialLinksEditor"));
 const TermsEditor = lazy(() => import("./pages/admin/TermsEditor"));
 const SmtpSettings = lazy(() => import("./pages/admin/SmtpSettings"));
 const DriveSettings = lazy(() => import("./pages/admin/DriveSettings"));
+const AdminPageNotFound = lazy(() => import("./pages/admin/AdminPageNotFound"));
 
 export default function App() {
   return (
@@ -53,6 +55,9 @@ export default function App() {
               <Route path="/terms-and-conditions" element={<TermsAndConditions />} />
               {/* Opened from the e-mail link; the token in the path is the key. */}
               <Route path="/pilih/:token" element={<PhotoSelection />} />
+              {/* Any other address gets the "halaman tidak ada" page, inside the
+                  public layout so the visitor keeps the menu and the footer. */}
+              <Route path="*" element={<PageNotFound />} />
             </Route>
 
             {/* Admin */}
@@ -78,7 +83,12 @@ export default function App() {
               <Route path="terms" element={<TermsEditor />} />
               <Route path="smtp" element={<SmtpSettings />} />
               <Route path="drive" element={<DriveSettings />} />
+              {/* Inside /admin the shell stays, so a mistyped address is not a
+                  blank page behind the login. */}
+              <Route path="*" element={<AdminPageNotFound />} />
             </Route>
+            {/* Last resort: an address outside both layouts, such as /adminXYZ. */}
+            <Route path="*" element={<PageNotFound />} />
           </Routes>
         </Suspense>
       </AuthProvider>
