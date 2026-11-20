@@ -8,6 +8,7 @@ import {
   Phone,
 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
+import useAdminList from "../../hooks/useAdminList";
 import CustomDatePicker from "../CustomDatePicker";
 import Modal from "../Modal";
 import CustomTimePicker from "../CustomTimePicker";
@@ -45,7 +46,6 @@ const VIEWS = [
 
 export default function BookingCalendar() {
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [cursor, setCursor] = useState(() => startOfMonth(new Date()));
   const [view, setView] = useState("month");
   const [selected, setSelected] = useState(null);
@@ -55,21 +55,19 @@ export default function BookingCalendar() {
   const [busy, setBusy] = useState(false);
   const [notice, setNotice] = useState("");
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    try {
-      const response = await adminApi.getBookings();
-      setBookings(Array.isArray(response.data) ? response.data : []);
-    } catch (error) {
-      setNotice(error.response?.data?.message || "Gagal memuat pemesanan.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
+  const list = useCallback(
+    () => adminApi.getBookings().then(({ data }) => (Array.isArray(data) ? data : [])),
+    []
+  );
+  // The cells read local state, because actions below edit a booking in place
+  // and the calendar has to show it before the next load confirms it.
+  const { data: loadedBookings, loading, error: loadError, reload: load } = useAdminList(list);
   useEffect(() => {
-    load();
-  }, [load]);
+    if (loadedBookings) setBookings(loadedBookings);
+  }, [loadedBookings]);
+  useEffect(() => {
+    if (loadError) setNotice(loadError);
+  }, [loadError]);
 
   const scheduledBookings = useMemo(
     () => bookings.filter((booking) => booking.eventDate),

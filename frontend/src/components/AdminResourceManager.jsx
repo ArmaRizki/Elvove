@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Plus, Pencil, Trash2, Upload } from "lucide-react";
 import { adminApi } from "../services/adminApi";
 import LoadingState from "./LoadingState";
 import EmptyState from "./EmptyState";
 import AdminPageHeader from "./admin/AdminPageHeader";
 import Modal from "./Modal";
+import useAdminList from "../hooks/useAdminList";
 import {
   adminIconButton,
   adminInput,
@@ -28,24 +29,14 @@ import {
  * fields: [{ name, label, type: 'text'|'textarea'|'number'|'checkbox'|'image', required }]
  */
 export default function AdminResourceManager({ title, fields, columns, api, emptyDefaults }) {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const list = useCallback(() => api.list().then((res) => res.data), [api]);
+  const { data: items, loading, error: loadError, reload: load } = useAdminList(list);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(emptyDefaults);
   const [saving, setSaving] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState("");
-
-  const load = () => {
-    setLoading(true);
-    api.list().then((res) => setItems(res.data)).finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -120,9 +111,18 @@ export default function AdminResourceManager({ title, fields, columns, api, empt
         }
       />
 
+      {loadError && (
+        <p role="status" className="mb-4 border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {loadError}{" "}
+          <button type="button" onClick={load} className="underline">
+            Coba lagi
+          </button>
+        </p>
+      )}
+
       {loading ? (
         <LoadingState label="Memuat data" />
-      ) : items.length === 0 ? (
+      ) : !items?.length ? (
         <EmptyState message={`Belum ada data ${title.toLowerCase()}. Tambahkan data pertama Anda.`} />
       ) : (
         <>

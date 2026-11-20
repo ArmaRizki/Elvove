@@ -5,6 +5,7 @@ import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
+import useAdminList from "../../hooks/useAdminList";
 import Modal from "../../components/Modal";
 import BookingDetails from "../../components/admin/BookingDetails";
 import BookingConfirmationEmail from "../../components/admin/BookingConfirmationEmail";
@@ -46,27 +47,24 @@ const NEXT_STATUSES = {
 };
 
 export default function Bookings() {
+  const list = useCallback(
+    () => adminApi.getBookings().then(({ data }) => (Array.isArray(data) ? data : [])),
+    []
+  );
+  const { data: loadedBookings, loading, reload: load } = useAdminList(list);
   const [bookings, setBookings] = useState([]);
-  const [loading, setLoading] = useState(true);
   const [selected, setSelected] = useState(null);
   const [statusSaving, setStatusSaving] = useState(false);
   const [notice, setNotice] = useState({ type: "", text: "" });
   const [searchParams, setSearchParams] = useSearchParams();
   const [deepLinkMessage, setDeepLinkMessage] = useState("");
 
-  const load = async () => {
-    setLoading(true);
-    try {
-      const { data } = await adminApi.getBookings();
-      setBookings(Array.isArray(data) ? data : []);
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // The list is copied into local state because three actions edit one booking
+  // in place — status, payment and e-mail tracking — and the row behind the
+  // open dialog has to agree with it before the next load confirms it.
   useEffect(() => {
-    load();
-  }, []);
+    if (loadedBookings) setBookings(loadedBookings);
+  }, [loadedBookings]);
 
   // The list row has no photo counts or folder ids, so the popup opens with it
   // and swaps in the full record from the detail endpoint when it arrives.

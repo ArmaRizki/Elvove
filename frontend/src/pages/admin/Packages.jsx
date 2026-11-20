@@ -1,10 +1,11 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import { formatPrice } from "../../utils/format";
 import LoadingState from "../../components/LoadingState";
 import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
+import useAdminList from "../../hooks/useAdminList";
 import Modal from "../../components/Modal";
 import {
   adminIconButton,
@@ -18,8 +19,8 @@ import {
 // Packages gets a dedicated page (rather than the generic AdminResourceManager)
 // because "features" is a list, entered here as one line per feature.
 export default function Packages() {
-  const [items, setItems] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const list = useCallback(() => adminApi.getPackages().then((res) => res.data), []);
+  const { data: items, loading, error: loadError, reload: load } = useAdminList(list);
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({
@@ -32,16 +33,6 @@ export default function Packages() {
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-
-  const load = () => {
-    setLoading(true);
-    adminApi.getPackages().then((res) => setItems(res.data)).finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -113,9 +104,18 @@ export default function Packages() {
         }
       />
 
+      {loadError && (
+        <p role="status" className="mb-4 border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {loadError}{" "}
+          <button type="button" onClick={load} className="underline">
+            Coba lagi
+          </button>
+        </p>
+      )}
+
       {loading ? (
         <LoadingState label="Memuat paket" />
-      ) : items.length === 0 ? (
+      ) : !items?.length ? (
         <EmptyState message="Belum ada paket. Tambahkan paket pertama Anda." />
       ) : (
         <>

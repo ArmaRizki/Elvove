@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 import { Plus, Pencil, Trash2 } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
@@ -6,6 +6,7 @@ import EmptyState from "../../components/EmptyState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import Modal from "../../components/Modal";
 import ImageUploadField from "../../components/admin/ImageUploadField";
+import useAdminList from "../../hooks/useAdminList";
 import {
   adminInput,
   adminLabel,
@@ -23,30 +24,25 @@ const emptyForm = {
 };
 
 export default function Photos() {
-  const [photos, setPhotos] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // Photos and the category list are fetched together: the form's category
+  // menu and the filter above the grid both read from the same answer.
+  const list = useCallback(
+    () =>
+      Promise.all([adminApi.getPhotos(), adminApi.getCategories()]).then(([p, c]) => ({
+        photos: p.data,
+        categories: c.data,
+      })),
+    []
+  );
+  const { data: loaded, loading, error: loadError, reload: load } = useAdminList(list);
+  const photos = loaded?.photos ?? [];
+  const categories = loaded?.categories ?? [];
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
   const [form, setForm] = useState(emptyForm);
-
-  const load = () => {
-    setLoading(true);
-    Promise.all([adminApi.getPhotos(), adminApi.getCategories()])
-      .then(([p, c]) => {
-        setPhotos(p.data);
-        setCategories(c.data);
-      })
-      .finally(() => setLoading(false));
-  };
-
-  useEffect(() => {
-    load();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   const openCreate = () => {
     setEditing(null);
@@ -101,9 +97,18 @@ export default function Photos() {
         }
       />
 
+      {loadError && (
+        <p role="status" className="mb-4 border border-red-200 bg-red-50 p-3 text-sm text-red-700">
+          {loadError}{" "}
+          <button type="button" onClick={load} className="underline">
+            Coba lagi
+          </button>
+        </p>
+      )}
+
       {loading ? (
         <LoadingState label="Memuat foto" />
-      ) : photos.length === 0 ? (
+      ) : !photos.length ? (
         <EmptyState message="Belum ada foto. Tambahkan foto pertama Anda." />
       ) : (
         <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 sm:gap-4 lg:grid-cols-4">
