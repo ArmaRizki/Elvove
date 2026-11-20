@@ -383,6 +383,19 @@ nginx frontend and the proxy, with the database and uploads on named/bind mounts
   `set-dev-admin.sh` (admin password on the throwaway copy database),
   `verify-staging.sh` (end-to-end checks) and `verify-gallery.sh` (the photo
   selection endpoints against a stubbed Google Drive).
+- `scripts/deploy.sh frontend|backend|nginx`: builds one part, puts it on the
+  server, points `compose.yml` at it, then checks it — the frontend answers 200
+  for the addresses the router knows and 404 for one it does not, the backend
+  proves the gallery limiter refuses, nginx proves its container got the
+  `worker_connections` and file descriptor limit. Migrations and `.env` stay
+  manual on purpose.
+- Backups, both on cron: `backend-go/scripts/backup-db.sh` (03:15, seven days)
+  and `backend-go/scripts/backup-uploads.sh` (03:45, three days). The uploads
+  script warns when its copy lands on the same filesystem as the images, which
+  is the usual case: a copy on the failing disk survives a deleted file, not a
+  dead card. Point `DEST` at another disk for a copy that does. Both verify the
+  archive before keeping it, and both restores were run: the database row counts
+  and the image checksums matched.
 
 Backend environment: `DB_*` or `DB_URL`, `JWT_SECRET`, `SMTP_ENCRYPTION_KEY`,
 `FRONTEND_URL`, `MAIL_SITE_URL`, `MAIL_ADMIN_URL`, `ADMIN_*`,
