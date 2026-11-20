@@ -6,8 +6,8 @@ import { adminPrimaryButton } from "../../components/admin/adminStyles";
  * The admin page for an address that does not exist.
  *
  * It sits inside AdminLayout, so an admin who mistypes a menu address keeps the
- * sidebar and can go back to a real page. Like the public 404 it answers 200;
- * see pages/PageNotFound.jsx for why the status is nginx's business.
+ * sidebar and can go back to a real page. Like the public 404 it is answered
+ * with a real 404 in production; see pages/PageNotFound.jsx.
  */
 export default function AdminPageNotFound() {
   return (

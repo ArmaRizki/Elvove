@@ -1,0 +1,10 @@
+# The production frontend image: the built site served by nginx, with the
+# configuration that answers 404 for an address the router does not know.
+#
+# nginx.prod.conf lives beside this file and is the copy used in production;
+# frontend/nginx.prod.conf in the repository is the source. Keep the two in step
+# (the deploy sends the repository file to _build/frontend before building).
+FROM nginx:alpine
+COPY nginx.prod.conf /etc/nginx/conf.d/default.conf
+COPY dist/ /usr/share/nginx/html/
+EXPOSE 5173

@@ -4,10 +4,10 @@ import SectionHeading from "../components/SectionHeading";
 /**
  * The page a visitor lands on when the address does not exist.
  *
- * It answers 200, because the site is a single page served by nginx as
- * index.html; making the status a real 404 needs nginx to answer it with
- * `error_page 404`, which is a separate change. The wording here avoids saying
- * "tidak ditemukan" about the status and only describes the address.
+ * Production answers it with a real 404: frontend/nginx.prod.conf knows which
+ * addresses the router has and sets the status for the rest, still serving
+ * index.html as the body so this screen appears. In the dev server every
+ * address is 200 — the status is nginx's job, and only production has it.
  */
 export default function PageNotFound() {
   return (
