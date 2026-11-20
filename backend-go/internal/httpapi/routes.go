@@ -55,6 +55,14 @@ type Server struct {
 	// the client page does not walk the whole folder tree again.
 	galleryListMu sync.Mutex
 	galleryListed map[string]galleryListing
+	// galleryWarming marks the bookings whose previews are being prepared in
+	// the background, so a reload does not start a second pass.
+	galleryWarmMu  sync.Mutex
+	galleryWarming map[int64]bool
+	// galleryConvert bounds how many originals are downloaded and converted at
+	// once. Twenty parallel cwebp runs on 45 MP photos kill each other on a
+	// small server, and the failed conversions leave broken images.
+	galleryConvert chan struct{}
 }
 
 type decimalValue string
@@ -72,7 +80,8 @@ func (d decimalValue) MarshalJSON() ([]byte, error) {
 func NewServer(cfg config.Config, db *store.Store) *Server {
 	limiter := NewRateLimiter()
 	s := &Server{Config: cfg, Store: db, Limiter: limiter, mailing: make(map[int64]bool),
-		galleryLocks: make(map[string]*keyedMutex), galleryListed: make(map[string]galleryListing)}
+		galleryLocks: make(map[string]*keyedMutex), galleryListed: make(map[string]galleryListing),
+		galleryWarming: make(map[int64]bool), galleryConvert: make(chan struct{}, galleryConverters)}
 	s.Auth = &Auth{Store: db, Secret: cfg.JWTSecret, Limiter: limiter, MaxAge: 24 * time.Hour}
 	s.Drive = drive.New(cfg.GoogleDrive.ClientID, cfg.GoogleDrive.ClientSecret, cfg.GoogleDrive.RefreshToken, cfg.GoogleDrive.TokenURL, cfg.GoogleDrive.APIBase, cfg.GoogleDrive.UploadBase)
 	return s

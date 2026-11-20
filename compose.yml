@@ -1,3 +1,6 @@
+# Keeps the existing containers and volumes when the folder is renamed.
+name: web-photography
+
 services:
   database:
     image: postgres:16-alpine

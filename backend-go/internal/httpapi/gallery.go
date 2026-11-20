@@ -112,7 +112,11 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 	if ok {
 		// The rows are per booking, so they are synced even on a cache hit: a
 		// second booking on the same folder would otherwise never get them.
-		return cached.files, s.syncBookingPhotos(r.Context(), booking.ID, cached.files)
+		if err := s.syncBookingPhotos(r.Context(), booking.ID, cached.files); err != nil {
+			return nil, err
+		}
+		s.warmGalleryPreviews(booking.ID)
+		return cached.files, nil
 	}
 	// The photographer sorts the photos into subfolders, so the whole tree is
 	// read. The three folders the site keeps for itself are left out.
@@ -126,6 +130,7 @@ func (s *Server) galleryPhotos(r *http.Request, client *drive.Client, booking ga
 	s.galleryListMu.Lock()
 	s.galleryListed[booking.RawFolderID] = galleryListing{files: files, at: time.Now()}
 	s.galleryListMu.Unlock()
+	s.warmGalleryPreviews(booking.ID)
 	return files, nil
 }
 
@@ -170,6 +175,10 @@ type galleryListing struct {
 // listingTTL is how long a listing is reused. A photo added to the folder shows
 // up on the client page within this window.
 const listingTTL = time.Minute
+
+// galleryConverters is how many originals are downloaded and converted at once.
+// Two keep a page moving without exhausting memory on a small server.
+const galleryConverters = 2
 
 // getGallery answers what the client page needs: the photos, the entitlement and
 // what is already picked. Previews are converted lazily by galleryPhoto, so this
@@ -269,11 +278,12 @@ func (s *Server) galleryPhoto(w http.ResponseWriter, r *http.Request) {
 	data, err := os.ReadFile(cache)
 	if err != nil {
 		// One conversion per photo even when the grid fires six requests at once.
-		unlock := s.galleryLock(token + "/" + fileID)
+		// The key matches the background warm-up, so the two never duplicate work.
+		unlock := s.galleryLock(fmt.Sprintf("%d/%s", booking.ID, fileID))
 		data, webpID, err = s.convertGalleryPhoto(r.Context(), client, booking, fileID, name, webpID, cache, original)
 		unlock()
 		if err != nil {
-			log.Printf("gallery convert %d/%s: %v", booking.ID, fileID, err)
+			log.Printf("gallery convert %d/%s (%s): %v", booking.ID, fileID, name, err)
 			writeError(w, 502, "Foto tidak dapat dimuat.")
 			return
 		}
@@ -284,10 +294,35 @@ func (s *Server) galleryPhoto(w http.ResponseWriter, r *http.Request) {
 	w.Write(data)
 }
 
-// convertGalleryPhoto downloads the original, scales it into a WebP, stores it in
-// the Drive "webp" subfolder and caches it on disk. Drive is asked only once per
-// photo: after that the local copy answers.
+// convertGalleryPhoto makes one preview: the Drive "webp" copy when this server
+// has none, the cached file when a previous run already made it, or the original
+// otherwise. Drive is asked only once per photo.
 func (s *Server) convertGalleryPhoto(ctx context.Context, client *drive.Client, booking galleryBooking, fileID, name, webpID, cache, original string) ([]byte, string, error) {
+	// Each conversion decodes a full-size photo. A page asks for dozens at once,
+	// and that many cwebp runs together run this server out of memory, so only a
+	// couple run at a time.
+	select {
+	case s.galleryConvert <- struct{}{}:
+		defer func() { <-s.galleryConvert }()
+	case <-ctx.Done():
+		return nil, webpID, ctx.Err()
+	}
+
+	// The WebP copy in Drive is a fraction of the original, so it refills a
+	// cache that a redeploy or a cleanup removed without converting again.
+	if webpID != "" {
+		if err := cacheGalleryWebP(ctx, client, webpID, cache); err == nil {
+			if data, readErr := os.ReadFile(cache); readErr == nil && len(data) > 0 {
+				return data, webpID, nil
+			}
+		}
+	}
+
+	// The preview may exist from a run that failed only at the upload step.
+	if data, err := os.ReadFile(cache); err == nil && len(data) > 0 {
+		return data, s.uploadGalleryWebP(ctx, client, booking, fileID, name, webpID, data), nil
+	}
+
 	body, err := client.Download(ctx, fileID)
 	if err != nil {
 		return nil, webpID, err
@@ -315,42 +350,171 @@ func (s *Server) convertGalleryPhoto(ctx context.Context, client *drive.Client, 
 	}
 	defer os.Remove(original)
 
-	if err := convertWebP(original, cache, 1600, 78); err != nil {
+	// A half-written cache would be served as a broken image forever, so cwebp
+	// writes next to it and the file is renamed into place only once complete.
+	tmp := cache + ".tmp"
+	if err := convertWebP(original, tmp, 1600, 78); err != nil {
+		os.Remove(tmp)
+		return nil, webpID, err
+	}
+	if err := os.Rename(tmp, cache); err != nil {
+		os.Remove(tmp)
 		return nil, webpID, err
 	}
 	data, err := os.ReadFile(cache)
 	if err != nil {
 		return nil, webpID, err
 	}
-	if webpID == "" {
-		if booking.WebpFolderID != "" {
-			// The folder was made with the booking; only a deleted one has to be
-			// looked up again.
-			if _, folderErr := client.Folder(ctx, booking.WebpFolderID); folderErr != nil {
-				booking.WebpFolderID = ""
-			}
-		}
-		folder := booking.WebpFolderID
-		if folder == "" {
-			folder, err = client.EnsureFolder(ctx, booking.RawFolderID, webpFolderName)
-		}
-		if err != nil {
-			// The preview still works; only the Drive copy is missing, so the next
-			// request retries instead of failing the page.
-			log.Printf("gallery webp folder booking %d: %v", booking.ID, err)
-			return data, webpID, nil
-		}
-		uploaded, uploadErr := client.Upload(ctx, folder, strings.TrimSuffix(name, filepath.Ext(name))+".webp", "image/webp", data)
-		if uploadErr != nil {
-			log.Printf("gallery webp upload booking %d: %v", booking.ID, uploadErr)
-			return data, webpID, nil
-		}
-		webpID = uploaded
-		if _, err := s.Store.Exec(ctx, `UPDATE booking_photos SET webp_file_id=$1,updated_at=NOW() WHERE booking_id=$2 AND drive_file_id=$3`, webpID, booking.ID, fileID); err != nil {
-			log.Printf("gallery webp save booking %d: %v", booking.ID, err)
+	return data, s.uploadGalleryWebP(ctx, client, booking, fileID, name, webpID, data), nil
+}
+
+// cacheGalleryWebP copies the preview already stored in Drive to the local
+// cache. It is much cheaper than downloading and converting the original again.
+func cacheGalleryWebP(ctx context.Context, client *drive.Client, fileID, cache string) error {
+	if err := os.MkdirAll(filepath.Dir(cache), 0750); err != nil {
+		return err
+	}
+	body, err := client.Download(ctx, fileID)
+	if err != nil {
+		return err
+	}
+	defer body.Close()
+	tmp := cache + ".tmp"
+	out, err := os.OpenFile(tmp, os.O_CREATE|os.O_TRUNC|os.O_WRONLY, 0640)
+	if err != nil {
+		return err
+	}
+	_, copyErr := io.Copy(out, body)
+	closeErr := out.Close()
+	if copyErr != nil {
+		os.Remove(tmp)
+		return copyErr
+	}
+	if closeErr != nil {
+		os.Remove(tmp)
+		return closeErr
+	}
+	return os.Rename(tmp, cache)
+}
+
+// uploadGalleryWebP puts a finished preview in the booking's "webp" subfolder
+// once. A failure only loses that Drive copy; the page keeps working from the
+// local cache and the next run retries.
+func (s *Server) uploadGalleryWebP(ctx context.Context, client *drive.Client, booking galleryBooking, fileID, name, webpID string, data []byte) string {
+	if webpID != "" {
+		return webpID
+	}
+	// The caller read webp_file_id before taking the per-photo lock; the warm-up
+	// may have uploaded the same preview while it waited, so the row wins over
+	// that stale empty value and Drive never holds two copies.
+	var stored string
+	if err := s.Store.Pool.QueryRow(ctx, `SELECT COALESCE(webp_file_id,'') FROM booking_photos WHERE booking_id=$1 AND drive_file_id=$2`, booking.ID, fileID).Scan(&stored); err == nil && stored != "" {
+		return stored
+	}
+	if booking.WebpFolderID != "" {
+		// The folder was made with the booking; only a deleted one has to be
+		// looked up again.
+		if _, folderErr := client.Folder(ctx, booking.WebpFolderID); folderErr != nil {
+			booking.WebpFolderID = ""
 		}
 	}
-	return data, webpID, nil
+	folder := booking.WebpFolderID
+	if folder == "" {
+		var err error
+		folder, err = client.EnsureFolder(ctx, booking.RawFolderID, webpFolderName)
+		if err != nil {
+			log.Printf("gallery webp folder booking %d: %v", booking.ID, err)
+			return webpID
+		}
+	}
+	uploaded, err := client.Upload(ctx, folder, strings.TrimSuffix(name, filepath.Ext(name))+".webp", "image/webp", data)
+	if err != nil {
+		log.Printf("gallery webp upload booking %d: %v", booking.ID, err)
+		return webpID
+	}
+	if _, err := s.Store.Exec(ctx, `UPDATE booking_photos SET webp_file_id=$1,updated_at=NOW() WHERE booking_id=$2 AND drive_file_id=$3`, uploaded, booking.ID, fileID); err != nil {
+		log.Printf("gallery webp save booking %d: %v", booking.ID, err)
+	}
+	return uploaded
+}
+
+// warmGalleryPreviews prepares a booking's previews in the background, so the
+// client opens a page of ready files instead of waiting for dozens of originals
+// to download and convert. It starts whenever a listing or a folder check finds
+// photos, the two moments a new upload becomes visible to the site.
+func (s *Server) warmGalleryPreviews(bookingID int64) {
+	s.galleryWarmMu.Lock()
+	if s.galleryWarming[bookingID] {
+		s.galleryWarmMu.Unlock()
+		return
+	}
+	s.galleryWarming[bookingID] = true
+	s.galleryWarmMu.Unlock()
+	go func() {
+		defer func() {
+			s.galleryWarmMu.Lock()
+			delete(s.galleryWarming, bookingID)
+			s.galleryWarmMu.Unlock()
+		}()
+		s.warmGalleryPreviewsNow(bookingID)
+	}()
+}
+
+// warmGalleryPreviewsNow converts every photo still missing a preview, one at a
+// time, and stops when the page is served. It uses its own context because the
+// request that discovered the photos ends long before the folder is done.
+func (s *Server) warmGalleryPreviewsNow(bookingID int64) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+	client := s.driveClientFor(ctx)
+	if !client.Enabled() {
+		return
+	}
+	var token, rawFolderID, webpFolderID string
+	err := s.Store.Pool.QueryRow(ctx, `SELECT COALESCE(selection_token,''), COALESCE(raw_folder_id,''), COALESCE(folder_webp_id,'')
+		FROM bookings WHERE id=$1`, bookingID).Scan(&token, &rawFolderID, &webpFolderID)
+	if err != nil || token == "" || rawFolderID == "" {
+		return
+	}
+	rows, err := s.Store.Pool.Query(ctx, `SELECT drive_file_id, file_name, COALESCE(webp_file_id,'')
+		FROM booking_photos WHERE booking_id=$1 AND COALESCE(webp_file_id,'')=''`, bookingID)
+	if err != nil {
+		log.Printf("gallery warm list booking %d: %v", bookingID, err)
+		return
+	}
+	type pendingPhoto struct{ id, name, webpID string }
+	pending := make([]pendingPhoto, 0, 16)
+	for rows.Next() {
+		var p pendingPhoto
+		if err := rows.Scan(&p.id, &p.name, &p.webpID); err != nil {
+			rows.Close()
+			log.Printf("gallery warm scan booking %d: %v", bookingID, err)
+			return
+		}
+		pending = append(pending, p)
+	}
+	rows.Close()
+	if err := rows.Err(); err != nil {
+		log.Printf("gallery warm list booking %d: %v", bookingID, err)
+		return
+	}
+	booking := galleryBooking{ID: bookingID, RawFolderID: rawFolderID, WebpFolderID: webpFolderID}
+	for _, p := range pending {
+		if ctx.Err() != nil {
+			return
+		}
+		cache := filepath.Join(s.Config.UploadDir, "gallery", token, p.id+".webp")
+		original := filepath.Join(s.Config.UploadDir, "originals", "gallery", token, p.id+".source")
+		unlock := s.galleryLock(fmt.Sprintf("%d/%s", bookingID, p.id))
+		_, _, err := s.convertGalleryPhoto(ctx, client, booking, p.id, p.name, p.webpID, cache, original)
+		unlock()
+		if err != nil {
+			log.Printf("gallery warm %d/%s (%s): %v", bookingID, p.id, p.name, err)
+			if ctx.Err() != nil {
+				return
+			}
+		}
+	}
 }
 
 // saveSelection replaces the picked set. The rules are the ones the page shows:

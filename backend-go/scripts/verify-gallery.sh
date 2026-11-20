@@ -334,7 +334,17 @@ assert_json 'the page lists the photos and the package limit' "$GALLERY" \
 assert_json 'nothing is selected yet' "$GALLERY" \
   "all(p['selected'] is False for p in d['photos'])"
 
-log '6. WebP preview is converted once and stored in Drive'
+log '6. WebP previews are prepared after a listing and stored in Drive'
+# Listing the photos starts the background warm-up; wait until both previews
+# exist instead of racing it.
+STATE=
+for _ in $(seq 1 80); do
+  STATE=$(curl -s "http://127.0.0.1:$DRIVE_PORT/state")
+  [[ $(printf '%s' "$STATE" | python3 -c 'import sys,json;print(len(json.load(sys.stdin)["uploads"]))') == 2 ]] && break
+  sleep 0.25
+done
+assert_json 'the photos are converted in the background, without opening each one' "$STATE" \
+  "len(d['uploads'])==2 and d['folders']['folderRAW123456/webp']=='folderWEBP12345'"
 CODE=$(curl -s -o "$WORK_DIR/one.webp" -w '%{http_code}' "$BASE/api/gallery/$GALLERY_TOKEN/photos/fileAAA111111")
 if [[ $CODE == 200 ]] && [[ -s $WORK_DIR/one.webp ]]; then
   ok 'the preview answers with bytes'
@@ -343,13 +353,16 @@ else
   docker logs "$API_CONTAINER" 2>&1 | tail -10
 fi
 if [[ $(head -c 4 "$WORK_DIR/one.webp") == RIFF ]]; then ok 'the preview is a WebP file'; else bad 'the preview is not WebP'; fi
-sleep 1
 STATE=$(curl -s "http://127.0.0.1:$DRIVE_PORT/state")
-assert_json 'the WebP was uploaded to the webp subfolder' "$STATE" \
-  "len(d['uploads'])==1 and d['folders']['folderRAW123456/webp']=='folderWEBP12345'"
-curl -s -o /dev/null "$BASE/api/gallery/$GALLERY_TOKEN/photos/fileAAA111111"
+assert_json 'opening a warmed photo does not upload again' "$STATE" "len(d['uploads'])==2"
+# A redeploy or a cleanup wipes the local cache; the Drive copy should refill it
+# instead of downloading and converting the original once more.
+docker exec "$API_CONTAINER" rm -rf "/tmp/uploads/gallery/$GALLERY_TOKEN"
+CODE=$(curl -s -o /dev/null -w '%{http_code}' "$BASE/api/gallery/$GALLERY_TOKEN/photos/fileAAA111111")
+[[ $CODE == 200 ]] && ok 'a wiped preview cache is refilled from the Drive copy' \
+  || bad "the refilled preview answered $CODE"
 STATE=$(curl -s "http://127.0.0.1:$DRIVE_PORT/state")
-assert_json 'a second request does not upload again' "$STATE" "len(d['uploads'])==1"
+assert_json 'refilling the cache does not upload another copy' "$STATE" "len(d['uploads'])==2"
 assert_json 'a photo id from another folder answers 404' \
   "$(curl -s "$BASE/api/gallery/$GALLERY_TOKEN/photos/fileZZZ999999")" \
   "d['status']==404"
