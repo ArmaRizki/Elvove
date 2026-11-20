@@ -364,7 +364,10 @@ nginx frontend and the proxy, with the database and uploads on named/bind mounts
 - `backend-go/Dockerfile`: multi-stage build, static binary, non-root uid 10001,
   `libwebp-tools` for the thumbnail conversion.
 - `nginx/default.conf`: proxies `/api` and `/uploads`, serves the SPA, and
-  applies rate limiting plus security headers.
+  applies rate limiting plus security headers. It streams gallery previews
+  instead of buffering them, and `compose.yml` raises the container's file
+  descriptor limit to match: with the stock limits, a folder page of photos
+  exhausted the worker and answered 503.
 - `backend-go/scripts/`: `run-web.sh` (the stack behind nginx),
   `set-dev-admin.sh` (admin password on the throwaway copy database),
   `verify-staging.sh` (end-to-end checks) and `verify-gallery.sh` (the photo

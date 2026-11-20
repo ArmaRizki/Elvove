@@ -91,6 +91,14 @@ services:
     image: nginx:alpine
     container_name: photography-local-nginx
     restart: unless-stopped
+    # The worker_connections value in nginx/default.conf (16384, instead of the
+    # stock 1024) needs enough descriptors; a worker that runs out cannot accept
+    # the connection and answers 503. The default limit is lower than the
+    # connection count, so it is raised here.
+    ulimits:
+      nofile:
+        soft: 65535
+        hard: 65535
     ports:
       - "8090:80"
     volumes:

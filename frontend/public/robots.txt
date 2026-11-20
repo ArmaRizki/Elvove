@@ -1,0 +1,11 @@
+# Elvove: what crawlers may read, and the one thing they should not.
+#
+# Client photo pages (/pilih/<token>) and the admin panel are private: the token
+# is the only key to a folder, so neither is listed here or in sitemap.xml.
+User-agent: *
+Disallow: /admin
+Disallow: /pilih/
+Disallow: /api/
+
+# The sitemap lists the pages a visitor can reach from the menu.
+Sitemap: https://elvove.site/sitemap.xml
