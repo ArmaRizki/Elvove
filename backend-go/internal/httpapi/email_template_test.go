@@ -114,10 +114,10 @@ func TestRenderBookingConfirmationMatchesJavaLayout(t *testing.T) {
 	}
 }
 
-// The customer and admin e-mails are black ink on white: the only colour left
-// is the wordmark in the header and the WhatsApp button. Anything that
-// reintroduces a brand-red accent outside the wordmark fails here.
-func TestEmailsKeepOnlyTheWordmarkAndWhatsAppInColour(t *testing.T) {
+// The customer and admin e-mails are black ink on white: the wordmark and the
+// call-to-action buttons carry the brand red, while the WhatsApp button keeps
+// its green. Anything that reintroduces a retired colour fails here.
+func TestEmailsUseBrandRedOnWordmarkAndButtons(t *testing.T) {
 	admin := sampleBooking()
 	admin.ID = 42
 	admin.Email = "budi@example.com"
@@ -140,16 +140,27 @@ func TestEmailsKeepOnlyTheWordmarkAndWhatsAppInColour(t *testing.T) {
 			_, h, _ := renderBookingInvoice(sampleBooking(), invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16"}, "Elvove", "081234567890", "https://elvove.site")
 			return h
 		}(),
+		"selection": func() string {
+			_, h, _ := renderBookingSelection(sampleBooking(), invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16", GalleryURL: "https://elvove.site/pilih/token", SelectionLimit: 10}, "Elvove", "081234567890", "https://elvove.site")
+			return h
+		}(),
 		"settlement": func() string {
 			_, h, _ := renderBookingSettlement(sampleBooking(), invoiceDetails{Number: "INV-2026-0012", IssuedAt: "2026-11-16", DownPaidAt: "2026-11-10"}, "Elvove", "081234567890", "https://elvove.site")
 			return h
 		}(),
 	} {
-		if count := strings.Count(html, emailBrandRed); count != 1 {
-			t.Errorf("%s: brand red appears %d times, want only the wordmark", name, count)
-		}
 		if !strings.Contains(html, "color:"+emailBrandRed+";\">ELVOVE</td>") {
-			t.Errorf("%s: the one brand-red use is not the ELVOVE wordmark", name)
+			t.Errorf("%s: the wordmark is not brand red", name)
+		}
+		// Admin notification has the panel button, invoice and selection the
+		// gallery button. The other three carry no call to action besides
+		// WhatsApp, so they must not show a red button.
+		wantRedButton := name == "admin" || name == "invoice" || name == "selection"
+		if got := strings.Contains(html, "background:"+emailBrandRed); got != wantRedButton {
+			t.Errorf("%s: red button present = %v, want %v", name, got, wantRedButton)
+		}
+		if name != "admin" && !strings.Contains(html, "background:"+emailWhatsAppGreen) {
+			t.Errorf("%s: WhatsApp button is not green", name)
 		}
 		for _, retired := range []string{"#F4F1F8", "#FCEEF1", "#F8F7FB", "#EEEAF2", "#858191", "#292638"} {
 			if strings.Contains(html, retired) {

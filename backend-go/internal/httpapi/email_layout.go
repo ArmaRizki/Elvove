@@ -270,13 +270,13 @@ func emailAdminButton(link string) string {
 		"style=\"width:100%;border-collapse:collapse;\">" +
 		"<tr><td align=\"center\" style=\"padding:26px 0 0 0;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">" +
-		"<tr><td align=\"center\" bgcolor=\"" + emailBadgeBg + "\" style=\"background:" + emailBadgeBg +
+		"<tr><td align=\"center\" bgcolor=\"" + emailBrandRed + "\" style=\"background:" + emailBrandRed +
 		";border-radius:5px;\">" +
 		"<!--[if mso]>" +
 		"<v:roundrect xmlns:v=\"urn:schemas-microsoft-com:vml\" " +
 		"xmlns:w=\"urn:schemas-microsoft-com:office:word\" href=\"" + href + "\" " +
 		"style=\"height:46px;v-text-anchor:middle;width:230px;\" arcsize=\"10%\" stroke=\"f\" " +
-		"fillcolor=\"" + emailBadgeBg + "\">" +
+		"fillcolor=\"" + emailBrandRed + "\">" +
 		"<w:anchorlock/>" +
 		"<center style=\"color:#ffffff;font-family:Arial,sans-serif;font-size:12px;font-weight:bold;" +
 		"letter-spacing:1px;\">BUKA DI PANEL ADMIN</center>" +

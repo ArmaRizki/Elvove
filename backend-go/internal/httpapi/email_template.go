@@ -20,14 +20,14 @@ const (
 	emailFont       = "Inter, Arial, Helvetica, sans-serif"
 	emailFontImport = "https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap"
 
-	// Palette: black ink on white. Only the logo, the ELVOVE wordmark and the
-	// WhatsApp button keep a colour, so the message reads as one monochrome
-	// document.
+	// Palette: black ink on white. The logo, the ELVOVE wordmark and the call
+	// to action buttons carry a colour; the WhatsApp button keeps its own
+	// green, everything else stays monochrome.
 	emailPage     = "#F5F5F5"
 	emailCard     = "#FFFFFF"
 	emailInk      = "#000000"
 	emailOnInk    = "#FFFFFF"
-	emailBrandRed = "#E11D48" // the ELVOVE wordmark in the header, nothing else
+	emailBrandRed = "#E11D48" // the wordmark and every button except WhatsApp
 	emailInfoBg   = "#FFFFFF"
 	emailBorder   = "#E5E5E5"
 	emailBadgeBg  = "#000000"
@@ -321,7 +321,7 @@ func emailGalleryBlock(block galleryBlock) string {
 		"</td></tr>" +
 		"<tr><td align=\"center\" style=\"padding:16px 18px 20px 18px;\">" +
 		"<table role=\"presentation\" cellpadding=\"0\" cellspacing=\"0\" border=\"0\">" +
-		"<tr><td align=\"center\" style=\"background:" + emailInk + ";border-radius:5px;\">" +
+		"<tr><td align=\"center\" bgcolor=\"" + emailBrandRed + "\" style=\"background:" + emailBrandRed + ";border-radius:5px;\">" +
 		"<a href=\"" + href + "\" style=\"display:inline-block;padding:13px 24px;font-family:" + emailFont +
 		";font-size:12px;line-height:20px;font-weight:700;letter-spacing:1.2px;color:" + emailOnInk +
 		";text-decoration:none;\">" + label + "</a>" +
