@@ -476,6 +476,7 @@ frontend/            React 19 + Vite + Tailwind
   src/pages/         public pages
   src/pages/admin/   admin screens
   src/services/      axios clients and API maps
+  public/admin/      admin PWA: manifest + a service worker that stores nothing
 nginx/               reverse proxy configuration
 scripts/             deploy.sh (build + ship + verify), check-hsts.sh
 compose.yml          local stack

@@ -1,6 +1,6 @@
 
-import { lazy, Suspense } from "react";
-import { BrowserRouter, Routes, Route, Navigate } from "react-router-dom";
+import { lazy, Suspense, useEffect } from "react";
+import { BrowserRouter, Routes, Route, Navigate, useLocation } from "react-router-dom";
 import { AuthProvider } from "./context/AuthContext";
 import ProtectedRoute from "./components/ProtectedRoute";
 import PublicLayout from "./components/PublicLayout";
@@ -35,9 +35,48 @@ const SmtpSettings = lazy(() => import("./pages/admin/SmtpSettings"));
 const DriveSettings = lazy(() => import("./pages/admin/DriveSettings"));
 const AdminPageNotFound = lazy(() => import("./pages/admin/AdminPageNotFound"));
 
+// The admin panel can be installed as an app. Its manifest and service worker
+// are attached only on /admin, so a visitor of the public site is never offered
+// "Install Elvove Admin". The service worker itself stores nothing; see
+// public/admin/sw.js for why.
+function AdminPwa() {
+  const { pathname } = useLocation();
+  const inAdmin = pathname === "/admin" || pathname.startsWith("/admin/");
+
+  useEffect(() => {
+    if (!inAdmin) return;
+
+    const manifest = document.createElement("link");
+    manifest.rel = "manifest";
+    manifest.href = "/admin/manifest.json";
+    const capable = document.createElement("meta");
+    capable.name = "apple-mobile-web-app-capable";
+    capable.content = "yes";
+    const appTitle = document.createElement("meta");
+    appTitle.name = "apple-mobile-web-app-title";
+    appTitle.content = "Elvove Admin";
+    document.head.append(manifest, capable, appTitle);
+
+    // A failed registration only costs the install prompt, so it must not be
+    // allowed to disturb the panel.
+    if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.register("/admin/sw.js", { scope: "/admin/" }).catch(() => {});
+    }
+
+    return () => {
+      manifest.remove();
+      capable.remove();
+      appTitle.remove();
+    };
+  }, [inAdmin]);
+
+  return null;
+}
+
 export default function App() {
   return (
     <BrowserRouter>
+      <AdminPwa />
       <AuthProvider>
         <Suspense fallback={<LoadingState />}>
           <Routes>
