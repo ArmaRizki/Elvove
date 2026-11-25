@@ -367,7 +367,7 @@ func (s *Server) getCategories(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) getPackages(w http.ResponseWriter, r *http.Request) {
-	rows, err := s.Store.Pool.Query(r.Context(), `SELECT p.id, p.title, p.price, p.display_order, p.highlighted, p.photo_selection_limit, COALESCE((SELECT json_agg(pf.feature) FROM package_features pf WHERE pf.package_id = p.id), '[]'::json) AS features FROM packages p ORDER BY p.display_order ASC`)
+	rows, err := s.Store.Pool.Query(r.Context(), `SELECT p.id, p.title, p.price, p.display_order, p.highlighted, p.photo_selection_limit, p.session_minutes, COALESCE((SELECT json_agg(pf.feature) FROM package_features pf WHERE pf.package_id = p.id), '[]'::json) AS features FROM packages p ORDER BY p.display_order ASC`)
 	if err != nil {
 		writeError(w, http.StatusInternalServerError, "Gagal memuat paket.")
 		return
@@ -381,13 +381,16 @@ func (s *Server) getPackages(w http.ResponseWriter, r *http.Request) {
 		Highlighted  bool         `json:"highlighted"`
 		// PhotoSelectionLimit is the number of raw photos the client may pick
 		// from this package; 0 means the package includes no selection.
-		PhotoSelectionLimit int             `json:"photoSelectionLimit"`
-		Features            json.RawMessage `json:"features"`
+		PhotoSelectionLimit int `json:"photoSelectionLimit"`
+		// SessionMinutes is the session length the calendar uses; 0 means the
+		// photographer has not set it and the calendar assumes two hours.
+		SessionMinutes int             `json:"sessionMinutes"`
+		Features       json.RawMessage `json:"features"`
 	}
 	items := make([]item, 0)
 	for rows.Next() {
 		var current item
-		if err := rows.Scan(&current.ID, &current.Title, &current.Price, &current.DisplayOrder, &current.Highlighted, &current.PhotoSelectionLimit, &current.Features); err != nil {
+		if err := rows.Scan(&current.ID, &current.Title, &current.Price, &current.DisplayOrder, &current.Highlighted, &current.PhotoSelectionLimit, &current.SessionMinutes, &current.Features); err != nil {
 			writeError(w, http.StatusInternalServerError, "Gagal memuat paket.")
 			return
 		}

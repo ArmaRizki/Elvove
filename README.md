@@ -333,6 +333,8 @@ to, arrives in `db/migrations/2026-11-16-foto-edit-folder.sql`.
 `folder_mustedit_id` and drops those two columns. Apply it **last**: it reads
 columns the earlier migrations create.
 `galleries`, `services`, `testimonials`, `videos` and `faqs` no longer exist.
+`packages.session_minutes` (how long a session runs, for the calendar's end
+time) arrives in `db/migrations/2026-11-26-package-session-minutes.sql`.
 
 Schema changes are handwritten SQL in `db/migrations/`, applied by hand in
 file-name order (a later date may depend on a column an earlier one adds).

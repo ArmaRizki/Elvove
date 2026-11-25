@@ -16,6 +16,13 @@ import {
   adminTableWrap,
 } from "../../components/admin/adminStyles";
 
+// A package's session length reads as hours when it divides evenly, because
+// "120 menit" is not how anyone says two hours.
+const durationLabel = (minutes) => {
+  if (!minutes) return "—";
+  return minutes % 60 === 0 ? `${minutes / 60} jam` : `${minutes} menit`;
+};
+
 // Packages gets a dedicated page (rather than the generic AdminResourceManager)
 // because "features" is a list, entered here as one line per feature.
 export default function Packages() {
@@ -30,6 +37,7 @@ export default function Packages() {
     displayOrder: 0,
     highlighted: false,
     photoSelectionLimit: 0,
+    sessionMinutes: 0,
   });
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
@@ -43,6 +51,7 @@ export default function Packages() {
       displayOrder: 0,
       highlighted: false,
       photoSelectionLimit: 0,
+      sessionMinutes: 0,
     });
     setError("");
     setModalOpen(true);
@@ -57,6 +66,7 @@ export default function Packages() {
       displayOrder: item.displayOrder,
       highlighted: item.highlighted,
       photoSelectionLimit: item.photoSelectionLimit || 0,
+      sessionMinutes: item.sessionMinutes || 0,
     });
     setError("");
     setModalOpen(true);
@@ -73,6 +83,7 @@ export default function Packages() {
       displayOrder: Number(form.displayOrder) || 0,
       highlighted: form.highlighted,
       photoSelectionLimit: Number(form.photoSelectionLimit) || 0,
+      sessionMinutes: Number(form.sessionMinutes) || 0,
     };
     try {
       if (editing) await adminApi.updatePackage(editing.id, payload);
@@ -126,6 +137,7 @@ export default function Packages() {
                   <th className="px-4 py-3 font-normal">Judul</th>
                   <th className="px-4 py-3 font-normal">Harga</th>
                   <th className="px-4 py-3 font-normal">Foto dipilih</th>
+                  <th className="px-4 py-3 font-normal">Durasi</th>
                   <th className="px-4 py-3 font-normal">Unggulan</th>
                   <th className="px-4 py-3" />
                 </tr>
@@ -138,6 +150,7 @@ export default function Packages() {
                     <td className="px-4 py-3 text-gray-700">
                       {item.photoSelectionLimit > 0 ? `${item.photoSelectionLimit} foto` : "—"}
                     </td>
+                    <td className="px-4 py-3 text-gray-700">{durationLabel(item.sessionMinutes)}</td>
                     <td className="px-4 py-3 text-gray-700">{item.highlighted ? "Ya" : "—"}</td>
                     <td className="px-4 py-3 text-right whitespace-nowrap">
                       <button
@@ -169,6 +182,9 @@ export default function Packages() {
                   <p className="text-sm text-gray-700">{formatPrice(item.price)}</p>
                   {item.photoSelectionLimit > 0 && (
                     <p className="text-xs text-gray-600">Termasuk pilih {item.photoSelectionLimit} foto</p>
+                  )}
+                  {item.sessionMinutes > 0 && (
+                    <p className="text-xs text-gray-600">Durasi {durationLabel(item.sessionMinutes)}</p>
                   )}
                   {item.highlighted && (
                     <p className="mt-1 text-xs text-[#E11D48]">Paling Banyak Dipesan</p>
@@ -239,6 +255,24 @@ export default function Packages() {
             <p className="mt-1 text-xs text-gray-500">
               Batas foto yang boleh dipilih klien di halaman pilihan foto, misalnya 10 untuk
               paket Origin atau 30 untuk Ascend. Isi 0 bila paket tidak termasuk pemilihan foto.
+            </p>
+          </div>
+          <div>
+            <label className={adminLabel} htmlFor="package-session-minutes">
+              DURASI SESI (MENIT)
+            </label>
+            <input
+              id="package-session-minutes"
+              type="number"
+              min="0"
+              max="1440"
+              value={form.sessionMinutes}
+              onChange={(e) => setForm({ ...form, sessionMinutes: e.target.value })}
+              className={adminInput}
+            />
+            <p className="mt-1 text-xs text-gray-500">
+              Lama sesi pemotretan, misalnya 120 untuk dua jam. Dipakai kalender sebagai jam
+              selesai acara. Isi 0 bila belum ditentukan — kalender akan memakai 2 jam.
             </p>
           </div>
           <div>

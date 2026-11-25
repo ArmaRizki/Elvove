@@ -165,6 +165,17 @@ func slugify(name string) string {
 	return strings.Trim(b.String(), "-")
 }
 
+// sessionMinutesError is the one rule for a package's session length: zero
+// means "not set yet", and a day is the ceiling because a longer "session" is
+// a typo, not a booking. Split out so the bounds are testable without a
+// database, the way the handler runs validation before it opens a transaction.
+func sessionMinutesError(minutes int) string {
+	if minutes < 0 || minutes > 1440 {
+		return "Durasi sesi harus antara 0 dan 1440 menit"
+	}
+	return ""
+}
+
 type packageRequest struct {
 	Title        string      `json:"title"`
 	Price        json.Number `json:"price"`
@@ -174,6 +185,9 @@ type packageRequest struct {
 	// PhotoSelectionLimit is how many raw photos the client may pick from this
 	// package ("Origin: 10"). Zero means the package includes no selection.
 	PhotoSelectionLimit *int `json:"photoSelectionLimit"`
+	// SessionMinutes is how long the session runs ("Origin: 120"). Zero means
+	// the photographer has not said yet; the calendar then assumes two hours.
+	SessionMinutes *int `json:"sessionMinutes"`
 }
 
 func (s *Server) createPackage(w http.ResponseWriter, r *http.Request) { s.savePackage(w, r, 0, true) }
@@ -213,6 +227,13 @@ func (s *Server) savePackage(w http.ResponseWriter, r *http.Request, id int64, c
 	if limit < 0 || limit > 1000 {
 		fieldErrors["photoSelectionLimit"] = "Jumlah foto pilihan harus antara 0 dan 1000"
 	}
+	minutes := 0
+	if req.SessionMinutes != nil {
+		minutes = *req.SessionMinutes
+	}
+	if message := sessionMinutesError(minutes); message != "" {
+		fieldErrors["sessionMinutes"] = message
+	}
 	if len(fieldErrors) > 0 {
 		writeValidationError(w, fieldErrors)
 		return
@@ -239,11 +260,11 @@ func (s *Server) savePackage(w http.ResponseWriter, r *http.Request, id int64, c
 	defer tx.Rollback(r.Context())
 	var pkgID int64
 	if create {
-		err = tx.QueryRow(r.Context(), `INSERT INTO packages(title,price,display_order,highlighted,photo_selection_limit,created_at,updated_at) VALUES($1,$2,$3,$4,$5,NOW(),NOW()) RETURNING id`, title, string(req.Price), order, req.Highlighted, limit).Scan(&pkgID)
+		err = tx.QueryRow(r.Context(), `INSERT INTO packages(title,price,display_order,highlighted,photo_selection_limit,session_minutes,created_at,updated_at) VALUES($1,$2,$3,$4,$5,$6,NOW(),NOW()) RETURNING id`, title, string(req.Price), order, req.Highlighted, limit, minutes).Scan(&pkgID)
 	} else {
 		// Java replaces the whole record: a missing displayOrder resets it to
 		// 0 (PackageItemService.apply) instead of keeping the previous value.
-		err = tx.QueryRow(r.Context(), `UPDATE packages SET title=$1,price=$2,display_order=$3,highlighted=$4,photo_selection_limit=$5,updated_at=NOW() WHERE id=$6 RETURNING id`, title, string(req.Price), order, req.Highlighted, limit, id).Scan(&pkgID)
+		err = tx.QueryRow(r.Context(), `UPDATE packages SET title=$1,price=$2,display_order=$3,highlighted=$4,photo_selection_limit=$5,session_minutes=$6,updated_at=NOW() WHERE id=$7 RETURNING id`, title, string(req.Price), order, req.Highlighted, limit, minutes, id).Scan(&pkgID)
 	}
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
@@ -271,7 +292,7 @@ func (s *Server) savePackage(w http.ResponseWriter, r *http.Request, id int64, c
 	if !create && req.DisplayOrder == nil {
 		_ = s.Store.Pool.QueryRow(r.Context(), `SELECT display_order FROM packages WHERE id=$1`, pkgID).Scan(&order)
 	}
-	response := map[string]any{"id": pkgID, "title": title, "price": decimalValue(req.Price.String()), "features": features, "displayOrder": order, "highlighted": req.Highlighted, "photoSelectionLimit": limit}
+	response := map[string]any{"id": pkgID, "title": title, "price": decimalValue(req.Price.String()), "features": features, "displayOrder": order, "highlighted": req.Highlighted, "photoSelectionLimit": limit, "sessionMinutes": minutes}
 	status := 200
 	if create {
 		status = 201
