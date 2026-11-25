@@ -25,12 +25,18 @@ import (
 	"os"
 	"strings"
 	"time"
+
+	"github.com/elvove/photography/backend-go/internal/drive"
+	"github.com/elvove/photography/backend-go/internal/gcal"
 )
 
 const (
 	listenAddr  = "127.0.0.1:8099"
 	redirectURI = "http://" + listenAddr + "/callback"
-	scope       = "https://www.googleapis.com/auth/drive"
+	// Both scopes in one consent: the site writes photos to Drive and bookings
+	// to Calendar with the same refresh token, so a token carrying only one of
+	// them silently breaks the other feature.
+	scope = drive.Scope + " " + gcal.Scope
 )
 
 func main() {

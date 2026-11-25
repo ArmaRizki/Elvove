@@ -150,18 +150,13 @@ func (s *Server) Handler() http.Handler {
 	admin.HandleFunc("PUT /api/admin/settings/smtp", s.saveSMTPSettings)
 	admin.HandleFunc("GET /api/admin/settings/booking-notifications", s.getNotificationSettings)
 	admin.HandleFunc("PUT /api/admin/settings/booking-notifications", s.saveNotificationSettings)
-	admin.HandleFunc("GET /api/admin/calendar-feed", s.getCalendarFeedURL)
-	admin.HandleFunc("POST /api/admin/calendar-feed/rotate", s.rotateCalendarFeed)
+	admin.HandleFunc("POST /api/admin/calendar/sync", s.syncCalendar)
 	admin.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) { writeNotFound(w) })
 	mux.Handle("/api/admin/", s.Auth.Middleware(s.Auth.RequireAdmin(admin)))
 	// The client photo-selection page. The token in the path is the only key:
 	// without it there is nothing to guess, so these stay outside the admin
 	// middleware.
 	mux.HandleFunc("GET /api/gallery/{token}", s.limitGallery(s.getGallery))
-	// The calendar subscription a calendar app fetches on its own. The token in
-	// the path is the only key, so, like the gallery, it stays outside the admin
-	// middleware; a wrong token answers 404.
-	mux.HandleFunc("GET /api/calendar/{file}", s.getCalendarFeed)
 	// The token and id are checked before the handler runs: without this
 	// pattern, a path that does not match one of the routes above falls to the
 	// catch-all "/" at the end of this function, which answers an empty 401 —

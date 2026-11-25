@@ -1,10 +1,10 @@
 import { useEffect, useState } from "react";
-import { Image, CalendarCheck, Package, Copy, Check, RotateCw } from "lucide-react";
+import { Image, CalendarCheck, Package, RefreshCw, Link } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import BookingCalendar from "../../components/admin/BookingCalendar";
-import { adminInput, adminSecondaryButton } from "../../components/admin/adminStyles";
+import { adminPrimaryButton, adminSecondaryButton } from "../../components/admin/adminStyles";
 
 const cards = [
   { key: "totalPhotos", label: "Total Foto", icon: Image },
@@ -15,6 +15,8 @@ const cards = [
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
+  const [syncResult, setSyncResult] = useState(null);
+  const [syncError, setSyncError] = useState("");
 
   useEffect(() => {
     adminApi
@@ -22,6 +24,17 @@ export default function Dashboard() {
       .then((res) => setSummary(res.data))
       .catch(() => setError("Statistik dasbor gagal dimuat."));
   }, []);
+
+  const syncCalendar = async () => {
+    setSyncError("");
+    setSyncResult(null);
+    try {
+      const res = await adminApi.syncCalendar();
+      setSyncResult(res.data);
+    } catch {
+      setSyncError("Sinkron kalender gagal. Coba lagi sebentar lagi.");
+    }
+  };
 
   return (
     <div className="min-w-0">
@@ -63,7 +76,42 @@ export default function Dashboard() {
         )
       )}
 
-      <CalendarFeedCard />
+      <section className="mt-8 min-w-0" aria-labelledby="dashboard-sync-heading">
+        <div className="mb-4">
+          <h2 id="dashboard-sync-heading" className="font-display text-xl text-gray-900">
+            Sinkron Kalender
+          </h2>
+          <p className="mt-1 text-sm text-gray-600">
+            Menulis pemesanan yang diterima ke Google Calendar akun elvo.vee@gmail.com, lewat
+            Google Calendar API — tidak ada link yang perlu dipasang.
+          </p>
+        </div>
+        <div className="flex flex-col gap-2 sm:flex-row">
+          <button
+            type="button"
+            onClick={syncCalendar}
+            className={`${adminPrimaryButton} inline-flex items-center gap-2`}
+          >
+            <RefreshCw size={15} /> Sinkronkan sekarang
+          </button>
+          <a
+            href="/admin/drive"
+            className={`${adminSecondaryButton} inline-flex items-center gap-2`}
+          >
+            <Link size={15} /> Hubungkan Google
+          </a>
+        </div>
+        {syncError ? (
+          <p className="mt-2 text-sm text-burgundy" role="alert">
+            {syncError}
+          </p>
+        ) : null}
+        {syncResult ? (
+          <p className="mt-2 text-sm text-gray-700" role="status">
+            Berhasil menyinkronkan {syncResult.synced ?? 0} pemesanan; {syncResult.failed ?? 0} gagal.
+          </p>
+        ) : null}
+      </section>
 
       <section className="mt-8 min-w-0" aria-labelledby="dashboard-calendar-heading">
         <div className="mb-4">
@@ -79,95 +127,5 @@ export default function Dashboard() {
         <BookingCalendar />
       </section>
     </div>
-  );
-}
-
-// The address a calendar app subscribes to. It doubles as a key: whoever holds
-// it can read the client names, hours and places in the feed, so the panel says
-// so plainly and offers a way to invalidate it.
-function CalendarFeedCard() {
-  const [url, setUrl] = useState("");
-  const [error, setError] = useState("");
-  const [copied, setCopied] = useState(false);
-
-  useEffect(() => {
-    adminApi
-      .getCalendarFeed()
-      .then((res) => setUrl(res.data.url))
-      .catch(() => setError("Alamat kalender gagal dimuat."));
-  }, []);
-
-  const copy = async () => {
-    try {
-      await navigator.clipboard.writeText(url);
-      setCopied(true);
-      window.setTimeout(() => setCopied(false), 2000);
-    } catch {
-      setError("Tidak bisa menyalin otomatis. Pilih alamatnya lalu salin manual.");
-    }
-  };
-
-  const rotate = async () => {
-    const sure = window.confirm(
-      "Buat alamat baru? Alamat lama langsung berhenti bekerja, dan kalender yang sudah berlangganan harus dipasang ulang.",
-    );
-    if (!sure) return;
-    try {
-      const res = await adminApi.rotateCalendarFeed();
-      setUrl(res.data.url);
-      setCopied(false);
-      setError("");
-    } catch {
-      setError("Alamat kalender gagal dibuat ulang.");
-    }
-  };
-
-  return (
-    <section className="mt-8 min-w-0" aria-labelledby="dashboard-feed-heading">
-      <div className="border border-gray-200 p-4 sm:p-6">
-        <h2 id="dashboard-feed-heading" className="font-display text-xl text-gray-900">
-          Langganan Kalender
-        </h2>
-        <p className="mt-1 text-sm text-gray-600">
-          Tempel alamat ini sekali di Google Calendar (Other calendars → From URL), Apple
-          Calendar, atau Outlook. Pemesanan muncul sendiri dan ikut berubah saat jadwalnya
-          diubah. Alamat ini berlaku seperti kunci — siapa pun yang memilikinya dapat melihat
-          nama dan jadwal klien, jadi jangan dibagikan.
-        </p>
-        <div className="mt-4 flex flex-col gap-2 sm:flex-row">
-          <input
-            readOnly
-            value={url}
-            onFocus={(event) => event.target.select()}
-            aria-label="Alamat langganan kalender"
-            placeholder="Memuat alamat…"
-            className={`${adminInput} min-w-0 sm:flex-1`}
-          />
-          <div className="flex shrink-0 gap-2">
-            <button
-              type="button"
-              onClick={copy}
-              disabled={!url}
-              className={`${adminSecondaryButton} inline-flex items-center gap-2`}
-            >
-              {copied ? <Check size={15} /> : <Copy size={15} />}
-              {copied ? "Tersalin" : "Salin"}
-            </button>
-            <button
-              type="button"
-              onClick={rotate}
-              className={`${adminSecondaryButton} inline-flex items-center gap-2`}
-            >
-              <RotateCw size={15} /> Buat ulang
-            </button>
-          </div>
-        </div>
-        {error && (
-          <p role="alert" className="mt-2 text-sm text-burgundy">
-            {error}
-          </p>
-        )}
-      </div>
-    </section>
   );
 }

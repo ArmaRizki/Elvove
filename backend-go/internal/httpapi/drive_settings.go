@@ -16,6 +16,7 @@ import (
 	"time"
 
 	"github.com/elvove/photography/backend-go/internal/drive"
+	"github.com/elvove/photography/backend-go/internal/gcal"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -162,7 +163,7 @@ func (s *Server) driveAuthURL(clientID string) string {
 		"state":         {s.driveOAuthState()},
 		"redirect_uri":  {s.driveRedirectURI()},
 		"response_type": {"code"},
-		"scope":         {drive.Scope},
+		"scope":         {drive.Scope + " " + gcal.Scope},
 		// offline + consent: without both, Google returns no refresh token on a
 		// second consent for the same account.
 		"access_type": {"offline"},

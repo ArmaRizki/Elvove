@@ -1173,6 +1173,11 @@ func (s *Server) transitionBooking(w http.ResponseWriter, r *http.Request, id in
 		writeError(w, 500, "Booking could not be updated.")
 		return false
 	}
+	// The calendar is a copy of the booking, so a Google failure must not undo
+	// the status change that just succeeded.
+	if target == "ACCEPTED" || target == "COMPLETED" {
+		s.syncCalendarQuietly(r.Context(), id)
+	}
 	if accept {
 		// Java's accept handler answers with the message plus the new status.
 		writeJSON(w, 200, map[string]any{"message": "Pemesanan ditandai sebagai diterima. Email konfirmasi belum dikirim.", "status": target})
@@ -1294,11 +1299,11 @@ func (s *Server) deleteBooking(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	// Read what has to be cleaned up before the row goes: afterwards there is
-	// no folder id or token left to name it.
-	var folderID, token string
+	// no folder id, token or calendar event left to name it.
+	var folderID, token, eventID string
 	if err := s.Store.Pool.QueryRow(r.Context(),
-		`SELECT COALESCE(raw_folder_id,''), COALESCE(selection_token,'')
-			FROM bookings WHERE id=$1`, id).Scan(&folderID, &token); err != nil && !errors.Is(err, pgx.ErrNoRows) {
+		`SELECT COALESCE(raw_folder_id,''), COALESCE(selection_token,''), COALESCE(google_event_id,'')
+			FROM bookings WHERE id=$1`, id).Scan(&folderID, &token, &eventID); err != nil && !errors.Is(err, pgx.ErrNoRows) {
 		writeError(w, 500, "Database operation failed.")
 		return
 	}
@@ -1309,6 +1314,7 @@ func (s *Server) deleteBooking(w http.ResponseWriter, r *http.Request) {
 		if token != "" {
 			os.RemoveAll(filepath.Join(s.Config.UploadDir, "gallery", token))
 		}
+		s.removeBookingFromCalendar(r.Context(), eventID)
 		writeEmpty(w, 204)
 	}
 }

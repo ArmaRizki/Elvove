@@ -70,10 +70,9 @@ export const adminApi = {
   getBookingNotificationSettings: () => api.get("/api/admin/settings/booking-notifications"),
   saveBookingNotificationSettings: (data) => api.put("/api/admin/settings/booking-notifications", data),
 
-  // The calendar subscription address shown on the dashboard. Rotating it
-  // replaces the token, so an address that leaked stops working.
-  getCalendarFeed: () => api.get("/api/admin/calendar-feed"),
-  rotateCalendarFeed: () => api.post("/api/admin/calendar-feed/rotate"),
+  // Writes every accepted booking into the connected Google Calendar. The
+  // panel offers it after connecting Google and as the retry after an outage.
+  syncCalendar: () => api.post("/api/admin/calendar/sync"),
 
   // Site content
   getAbout: () => api.get("/api/public/about"),

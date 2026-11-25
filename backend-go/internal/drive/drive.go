@@ -122,6 +122,12 @@ func folderInURL(value string) string {
 	return ""
 }
 
+// AccessToken lets the Calendar client use the same connection instead of
+// trading a second one with Google: one refresh token, one cached access token.
+func (c *Client) AccessToken(ctx context.Context) (string, error) {
+	return c.accessToken(ctx)
+}
+
 // accessToken mints a short-lived token from the refresh token and caches it
 // until a minute before it expires.
 func (c *Client) accessToken(ctx context.Context) (string, error) {
