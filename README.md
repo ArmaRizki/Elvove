@@ -23,6 +23,7 @@ This README records what changed.
 | Booking flow | `PENDING → CONTACTED → COMPLETED` | `PENDING → ACCEPTED → COMPLETED`, with `RESCHEDULE_REQUESTED` only while the date is not yet agreed |
 | E-mail | none | SMTP stored in DB, confirmation, invoice, settlement, reschedule and admin notifications |
 | Photo selection | none | `/pilih/<token>` per booking: WebP previews from the raw Drive folder, a per-package quota, the picks copied into `foto terpilih` |
+| Calendar | none | `/api/calendar/<token>.ics` subscription for Google/Apple/Outlook, built from `bookings` on every fetch |
 | Uploads | 10 MB, extension check only | 50/100 MB, magic-byte check, WebP thumbnail + preview, original admin-only |
 | First admin | hard-coded `admin` / `admin123` | env bootstrap, only while the table is empty, with Java's password rules |
 | JWT secret | hard-coded in `application.yml` | environment variable, at least 32 bytes |
@@ -236,6 +237,24 @@ terms-and-conditions.
   account has no storage quota of its own, so it can read a shared folder but
   cannot upload into it. The OAuth consent screen must be published: while the
   app is in *Testing*, Google expires refresh tokens after seven days.
+
+### Calendar feed
+
+- `GET /api/calendar/<token>.ics` is a subscription a calendar app fetches on its
+  own, so it sits outside the admin login; the 32-character token in the path is
+  the only key, and a wrong one answers `404`. The address is shown, with a
+  **Salin** and a **Buat ulang** button, on the dashboard.
+- Events come from `bookings` on every fetch, so the feed is never stale and no
+  second copy of client data exists. Only name, package, place, date and time
+  leave the database — never e-mail, phone or the client's message.
+- `UID` is `booking-<id>@elvove.site`, so a reschedule updates the existing event
+  instead of adding another. `ACCEPTED`/`COMPLETED` are `CONFIRMED`, the rest
+  `TENTATIVE`; a booking without an hour becomes an all-day event.
+- Times are `Asia/Jakarta`: the database stores the photographer's wall clock, so
+  the hour she typed is the hour the calendar shows.
+- The end time is `packages.session_minutes` (edited on the packages page), with
+  two hours as the fallback for a package that has not been filled in yet.
+- `calendar_feed` holds only the token (`db/migrations/2026-11-26-calendar-feed.sql`).
 
 ### Terms & Conditions
 
