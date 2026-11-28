@@ -1,10 +1,9 @@
 import { useEffect, useState } from "react";
-import { Image, CalendarCheck, Package, RefreshCw, Link } from "lucide-react";
+import { Image, CalendarCheck, Package } from "lucide-react";
 import { adminApi } from "../../services/adminApi";
 import LoadingState from "../../components/LoadingState";
 import AdminPageHeader from "../../components/admin/AdminPageHeader";
 import BookingCalendar from "../../components/admin/BookingCalendar";
-import { adminPrimaryButton, adminSecondaryButton } from "../../components/admin/adminStyles";
 
 const cards = [
   { key: "totalPhotos", label: "Total Foto", icon: Image },
@@ -15,8 +14,6 @@ const cards = [
 export default function Dashboard() {
   const [summary, setSummary] = useState(null);
   const [error, setError] = useState("");
-  const [syncResult, setSyncResult] = useState(null);
-  const [syncError, setSyncError] = useState("");
 
   useEffect(() => {
     adminApi
@@ -24,17 +21,6 @@ export default function Dashboard() {
       .then((res) => setSummary(res.data))
       .catch(() => setError("Statistik dasbor gagal dimuat."));
   }, []);
-
-  const syncCalendar = async () => {
-    setSyncError("");
-    setSyncResult(null);
-    try {
-      const res = await adminApi.syncCalendar();
-      setSyncResult(res.data);
-    } catch {
-      setSyncError("Sinkron kalender gagal. Coba lagi sebentar lagi.");
-    }
-  };
 
   return (
     <div className="min-w-0">
@@ -75,43 +61,6 @@ export default function Dashboard() {
           </div>
         )
       )}
-
-      <section className="mt-8 min-w-0" aria-labelledby="dashboard-sync-heading">
-        <div className="mb-4">
-          <h2 id="dashboard-sync-heading" className="font-display text-xl text-gray-900">
-            Sinkron Kalender
-          </h2>
-          <p className="mt-1 text-sm text-gray-600">
-            Menulis pemesanan yang diterima ke Google Calendar akun elvo.vee@gmail.com, lewat
-            Google Calendar API — tidak ada link yang perlu dipasang.
-          </p>
-        </div>
-        <div className="flex flex-col gap-2 sm:flex-row">
-          <button
-            type="button"
-            onClick={syncCalendar}
-            className={`${adminPrimaryButton} inline-flex items-center gap-2`}
-          >
-            <RefreshCw size={15} /> Sinkronkan sekarang
-          </button>
-          <a
-            href="/admin/drive"
-            className={`${adminSecondaryButton} inline-flex items-center gap-2`}
-          >
-            <Link size={15} /> Hubungkan Google
-          </a>
-        </div>
-        {syncError ? (
-          <p className="mt-2 text-sm text-burgundy" role="alert">
-            {syncError}
-          </p>
-        ) : null}
-        {syncResult ? (
-          <p className="mt-2 text-sm text-gray-700" role="status">
-            Berhasil menyinkronkan {syncResult.synced ?? 0} pemesanan; {syncResult.failed ?? 0} gagal.
-          </p>
-        ) : null}
-      </section>
 
       <section className="mt-8 min-w-0" aria-labelledby="dashboard-calendar-heading">
         <div className="mb-4">

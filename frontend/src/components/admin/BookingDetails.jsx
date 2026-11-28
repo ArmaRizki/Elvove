@@ -37,37 +37,33 @@ export default function BookingDetails({ booking }) {
     <div className="divide-y divide-gray-200">
       <Section title="Klien & acara">
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Nama" value={booking.name || "Belum tercatat"} />
-          <Field label="Email" breakAll value={booking.email || "Belum tercatat"} />
-          <Field label="Telepon" value={booking.phone || "Belum tercatat"} />
-          <Field label="Lokasi" value={booking.eventLocation || "Belum diisi"} />
-          <Field label="Tanggal acara" value={formatDate(booking.eventDate) || "Belum tercatat"} />
-          <Field label="Waktu sesi" value={formatTime(booking.eventTime) || "Belum ditentukan"} />
+          <Field label="Nama" value={booking.name || "—"} />
+          <Field label="Email" breakAll value={booking.email || "—"} />
+          <Field label="Telepon" value={booking.phone || "—"} />
+          <Field label="Lokasi" value={booking.eventLocation || "—"} />
+          <Field label="Tanggal acara" value={formatDate(booking.eventDate) || "—"} />
+          <Field label="Waktu sesi" value={formatTime(booking.eventTime) || "—"} />
         </dl>
       </Section>
 
       <Section title="Paket">
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Nama paket" value={booking.packageTitle || "Belum tercatat"} />
-          <Field label="Harga" value={formatPrice(booking.packagePrice) || "Belum tercatat"} />
+          <Field label="Nama paket" value={booking.packageTitle || "—"} />
+          <Field label="Harga" value={formatPrice(booking.packagePrice) || "—"} />
         </dl>
-        <p className="mt-3 text-xs text-gray-500">
-          Nama dan harga tersimpan saat pemesanan dibuat, jadi tetap sama meskipun paket di halaman
-          publik diubah atau dihapus.
-        </p>
       </Section>
 
       <Section title="Catatan klien">
         {booking.message ? (
           <p className="whitespace-pre-line break-words text-sm text-gray-900">{booking.message}</p>
         ) : (
-          <p className="text-sm text-gray-500">Tidak ada catatan dari klien.</p>
+          <p className="text-sm text-gray-500">—</p>
         )}
       </Section>
 
       <Section title="Pencatatan">
         <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-          <Field label="Dibuat pada" value={createdAt || "Belum tercatat"} />
+          <Field label="Dibuat pada" value={createdAt || "—"} />
           {downPaidAt && <Field label="DP dibayar pada" value={downPaidAt} />}
           {settledAt && <Field label="Lunas pada" value={settledAt} />}
         </dl>

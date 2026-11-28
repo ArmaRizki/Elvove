@@ -19,6 +19,7 @@ import {
 import {
   STATUS_OPTIONS,
   formatDate,
+  formatDateTime,
   formatTime,
   paymentBadge,
   paymentLabel,
@@ -26,6 +27,58 @@ import {
   statusLabel,
 } from "../../components/admin/adminFormat";
 import { formatPrice } from "../../utils/format";
+
+const SORT_OPTIONS = [
+  { value: "createdAt", label: "Waktu pemesanan" },
+  { value: "eventDate", label: "Tanggal book" },
+];
+
+// Newest booking first, nearest event first.
+const SORT_DIRECTION = { createdAt: -1, eventDate: 1 };
+
+const collator = new Intl.Collator("id", { numeric: true, sensitivity: "base" });
+
+// Raw values, because the visible dates are dd/mm/yyyy and do not order as
+// strings. eventDate ("2026-11-25") and createdAt ("2026-11-25T05:30:00") are
+// ISO, so comparing them as text is chronological. A missing date sorts last.
+const sortValue = {
+  createdAt: (booking) => booking.createdAt || "",
+  eventDate: (booking) => booking.eventDate || "",
+};
+
+function sortBookings(list, key) {
+  const value = sortValue[key];
+  const factor = SORT_DIRECTION[key];
+  return [...list].sort((a, b) => {
+    const left = value(a);
+    const right = value(b);
+    if (!left && !right) return 0;
+    if (!left) return 1;
+    if (!right) return -1;
+    return factor * collator.compare(left, right);
+  });
+}
+
+// One order for the desktop table and the phone cards, so the two layouts
+// never disagree.
+function SortOrder({ order, onChange }) {
+  return (
+    <label className="mb-3 flex items-center gap-2 text-xs text-gray-600">
+      <span>Urutkan</span>
+      <select
+        value={order}
+        onChange={(event) => onChange(event.target.value)}
+        className="border border-gray-200 bg-transparent px-2 py-1.5 text-xs text-gray-900 outline-none focus:border-[#E11D48]"
+      >
+        {SORT_OPTIONS.map((option) => (
+          <option key={option.value} value={option.value}>
+            {option.label}
+          </option>
+        ))}
+      </select>
+    </label>
+  );
+}
 
 function StatusBadge({ status }) {
   return (
@@ -54,10 +107,13 @@ export default function Bookings() {
   const { data: loadedBookings, loading, reload: load } = useAdminList(list);
   const [bookings, setBookings] = useState([]);
   const [selected, setSelected] = useState(null);
+  const [order, setOrder] = useState("createdAt");
   const [statusSaving, setStatusSaving] = useState(false);
   const [notice, setNotice] = useState({ type: "", text: "" });
   const [searchParams, setSearchParams] = useSearchParams();
   const [deepLinkMessage, setDeepLinkMessage] = useState("");
+
+  const sortedBookings = bookings.length ? sortBookings(bookings, order) : bookings;
 
   // The list is copied into local state because three actions edit one booking
   // in place — status, payment and e-mail tracking — and the row behind the
@@ -195,12 +251,21 @@ export default function Bookings() {
         <EmptyState message="Belum ada pemesanan." />
       ) : (
         <>
+          <SortOrder order={order} onChange={setOrder} />
+
           {/* Tabel desktop */}
-          <div className={`hidden lg:block ${adminTableWrap}`}>
+          <div
+            className={`hidden lg:block ${adminTableWrap}`}
+            role="region"
+            aria-label="Daftar pemesanan"
+            tabIndex={0}
+          >
             <table className={adminTableWide}>
+              <caption className="sr-only">Daftar pemesanan</caption>
               <thead>
                 <tr className="border-b border-gray-200 text-left text-gray-700">
                   <th className="px-4 py-3 font-normal">Nama</th>
+                  <th className="px-4 py-3 font-normal">Dipesan</th>
                   <th className="px-4 py-3 font-normal">Kontak</th>
                   <th className="px-4 py-3 font-normal">Lokasi</th>
                   <th className="px-4 py-3 font-normal">Paket</th>
@@ -211,9 +276,13 @@ export default function Bookings() {
               </thead>
 
               <tbody>
-                {bookings.map((b) => (
+                {sortedBookings.map((b) => (
                   <tr key={b.id} className="border-b border-gray-200 align-top last:border-0">
                     <td className="px-4 py-3 text-gray-900">{b.name}</td>
+
+                    <td className="whitespace-nowrap px-4 py-3 text-gray-700">
+                      {formatDateTime(b.createdAt) || "—"}
+                    </td>
 
                     <td className="px-4 py-3 text-gray-700">
                       <p className="break-all">{b.email}</p>
@@ -286,7 +355,7 @@ export default function Bookings() {
 
           {/* Kartu untuk layar kecil */}
           <div className="space-y-3 lg:hidden">
-            {bookings.map((b) => (
+            {sortedBookings.map((b) => (
               <article key={b.id} className="border border-gray-200 p-4">
                 <div className="flex items-start justify-between gap-3">
                   <div className="min-w-0">

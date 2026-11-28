@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import {
+  CalendarCheck,
   CheckCircle2,
   ExternalLink,
   FolderPlus,
@@ -345,7 +346,7 @@ export default function DriveSettings() {
         </div>
       </section>
 
-      <section className={adminCard}>
+      <section className={`${adminCard} mb-6`}>
         <h2 className="mb-1 font-display text-lg text-gray-900">3. Pemesanan yang Sudah Ada</h2>
         <p className="mb-4 text-sm text-gray-600">
           Pemesanan yang masuk sebelum Drive tersambung belum punya folder. Buat sekaligus di sini;
@@ -372,6 +373,32 @@ export default function DriveSettings() {
         >
           {busy === "backfill" ? <LoaderCircle size={16} className="animate-spin" /> : <RefreshCw size={16} />}
           Buat Folder yang Belum Ada
+        </button>
+      </section>
+
+      <section className={adminCard}>
+        <h2 className="mb-1 font-display text-lg text-gray-900">4. Sinkron Kalender</h2>
+        <p className="mb-4 text-sm text-gray-600">
+          Menyamakan semua pemesanan bertanggal ke Google Calendar akun yang tersambung di atas.
+          Pemesanan baru dan perubahan status tersinkron otomatis; tombol ini untuk menyusul yang belum.
+        </p>
+        <button
+          type="button"
+          onClick={() =>
+            run("sync", () => adminApi.syncCalendar(), null).then((data) => {
+              if (data) {
+                setNotice({
+                  type: data.failed ? "error" : "success",
+                  text: `${data.synced} acara tersinkron, ${data.failed} gagal.`,
+                });
+              }
+            })
+          }
+          disabled={!connected || busy === "sync"}
+          className={adminPrimaryButton}
+        >
+          {busy === "sync" ? <LoaderCircle size={16} className="animate-spin" /> : <CalendarCheck size={16} />}
+          Sinkronkan Kalender
         </button>
       </section>
     </div>
